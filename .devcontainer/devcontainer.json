@@ -1,0 +1,47 @@
+{
+  "name": "mpdlx-b-new",
+  "containerName": "mpdlx-b-new-dev",
+  "image": "mpdlx-b-snap:20241224",
+  "workspaceFolder": "/workspaces/MPDLX-B-new",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/MPDLX-B-new,type=bind,consistency=cached",
+  "runArgs": [
+    "--gpus=all",
+    "--ipc=host",
+    "--shm-size=16g",
+    "--env=DISPLAY=${localEnv:DISPLAY}",
+    "--env=NVIDIA_VISIBLE_DEVICES=all",
+    "--env=NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics",
+    "--env=QT_X11_NO_MITSHM=1",
+    "--device=/dev/dri"
+  ],
+  "mounts": [
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached"
+  ],
+  "containerEnv": {
+    "MPDLX_ROOT": "/workspaces/MPDLX-B-new",
+    "MPDLX_REPO": "/workspaces/MPDLX-B-new/mpd-splines-public",
+    "MPDLX_DATA_ROOT": "/workspaces/MPDLX-B-new/data_public",
+    "MPDLX_ISAAC_ROOT": "/workspaces/MPDLX-B-new/mpd-splines-public/deps/isaacgym",
+    "MPDLX_ISAAC_ARCHIVE": "/workspaces/MPDLX-B-new/IsaacGym_Preview_4_Package.tar.gz",
+    "MPDLX_BUILD_OMPL": "1",
+    "MAMBA_ROOT_PREFIX": "/opt/conda"
+  },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "remoteUser": "vscode",
+  "overrideCommand": false,
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/conda/envs/mpd-splines-public/bin/python"
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-azuretools.vscode-docker",
+        "ms-vscode.cpptools",
+        "tamasfe.even-better-toml",
+        "charliermarsh.ruff"
+      ]
+    }
+  }
+}

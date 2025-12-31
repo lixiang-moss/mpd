@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Project large/derived artifacts (avoid GitHub 100MB limit)
+data_public/
+IsaacGym_Preview_4_Package.tar.gz
+
+# Inference outputs / logs (very large)
+mpd-splines-public/scripts/inference/logs/
+mpd-splines-public/logs/
+
+# Vendored third-party deps (very large / may be licensed)
+mpd-splines-public/deps/isaacgym/
+mpd-splines-public/deps/pybullet_ompl/
