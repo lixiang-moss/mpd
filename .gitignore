@@ -19,6 +19,10 @@ venv/
 data_public/
 IsaacGym_Preview_4_Package.tar.gz
 
+# Data symlinks inside mpd-splines-public (often absolute paths; don't commit)
+mpd-splines-public/data_trained_models
+mpd-splines-public/data_trajectories
+
 # Inference outputs / logs (very large)
 mpd-splines-public/scripts/inference/logs/
 mpd-splines-public/logs/
