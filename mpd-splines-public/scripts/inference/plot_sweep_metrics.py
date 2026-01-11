@@ -5,7 +5,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import matplotlib
 
@@ -14,6 +14,14 @@ matplotlib.use("Agg")
 warnings.filterwarnings("ignore", message="Unable to import Axes3D.*")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+
+
+def _infer_scenario_label(*, results_root: str, csv_path: str, override: str = "") -> str:
+    override = (override or "").strip()
+    if override:
+        return override
+    probe = f"{results_root}\n{csv_path}".lower()
+    return "scene02" if "replace" in probe else "scene01"
 
 
 def _safe_float(x: Any) -> float:
@@ -371,6 +379,11 @@ def main() -> None:
         default=20,
         help="Print top-K configs by (fraction_valid_min, fraction_valid_mean, time).",
     )
+    parser.add_argument(
+        "--scenario",
+        default="",
+        help="Scenario label (default: infer from path; 'scene02' if 'replace' appears, else 'scene01').",
+    )
     args = parser.parse_args()
 
     if not args.csv_path and not args.results_root:
@@ -383,11 +396,13 @@ def main() -> None:
         raise FileNotFoundError(f"Missing CSV: {csv_path}")
 
     results_root = args.results_root or os.path.dirname(csv_path)
+    scenario = _infer_scenario_label(results_root=results_root, csv_path=csv_path, override=args.scenario)
     out_dir = args.out_dir or os.path.join(results_root, "plots")
     os.makedirs(out_dir, exist_ok=True)
 
     # Read CSV and aggregate by run_tag across seeds.
     by_tag: Dict[str, _Agg] = {}
+    csv_scenarios: Set[str] = set()
     with open(csv_path, "r", newline="") as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames or []
@@ -412,6 +427,10 @@ def main() -> None:
             metric_fields.append("fraction_valid")
 
         for row in reader:
+            csv_scenario = (row.get("scenario") or "").strip()
+            if csv_scenario:
+                csv_scenarios.add(csv_scenario)
+
             tag = (row.get("run_tag") or "").strip()
             if not tag:
                 continue
@@ -421,10 +440,20 @@ def main() -> None:
                 by_tag[tag] = agg
             agg.add(row, metric_fields=metric_fields)
 
+    if len(csv_scenarios) == 1 and not args.scenario:
+        scenario = next(iter(csv_scenarios))
+    elif len(csv_scenarios) > 1:
+        raise ValueError(
+            f"CSV contains multiple scenarios ({sorted(csv_scenarios)}). "
+            "Split the data and run plot_sweep_metrics.py separately per scenario."
+        )
+
     aggregated_rows: List[Dict[str, Any]] = []
     for tag, agg in by_tag.items():
         info = _parse_run_tag(tag)
         out: Dict[str, Any] = {
+            "scenario": scenario,
+            "results_root": results_root,
             "run_tag": tag,
             "n_rows": agg.n_rows,
             "fraction_valid_mean": agg.mean("fraction_valid"),

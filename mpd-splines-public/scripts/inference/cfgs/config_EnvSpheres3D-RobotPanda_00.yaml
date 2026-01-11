@@ -12,8 +12,8 @@ model_selection: 'bspline'  # 'bspline', 'waypoints'
 
 min_distance_q_pos_start_goal: 3.5  # minimum distance between start and goal configurations np.sqrt(7*2*(np.pi/2)**2)=5.88
 
-env_id_replace: null
-#env_id_replace: 'EnvSpheres3DExtraObjectsV00'
+#env_id_replace: null
+env_id_replace: 'EnvSpheres3DExtraObjectsV00'
 
 grasped_object: null
 
@@ -60,7 +60,7 @@ best_trajectory_selection: 'shortest_path_length'
 
 planner_alg: 'mpd'  # diffusion_prior, diffusion_prior_then_guide, mpd, gp_prior_then_guide, knn_prior_then_guide, cvae, cvae_prior_then_guide
 
-diffusion_sampling_method: 'dpm_solver_pp'  # ddim, ddpm (not tuned), dpm_solver, dpm_solver_pp, unipc
+diffusion_sampling_method: 'ddim'  # ddim, ddpm (not tuned), dpm_solver, dpm_solver_pp, unipc
 
 compute_costs_with_xrecon: false
 
@@ -108,19 +108,20 @@ ddpm:
 
 # dpm-solver options
 dpm_solver:
-  t_start_guide_steps_fraction: 0.08 #0.3
-  dpm_solver_steps: 26 #76 #10 multistep=26, singlestep
+  t_start_guide_steps_fraction: 0.2 #0.3
+  dpm_solver_steps: 76 #76 #10 multistep=26, singlestep
   dpm_solver_order: 2
   dpm_solver_method: 'multistep'  # 'multistep', 'singlestep', 'singlestep_fixed'
   dpm_solver_algorithm_type: 'dpmsolver++'
   dpm_solver_skip_type: 'logSNR'  # 'time_uniform', 'logSNR', 'time_quadratic'
   dpm_solver_solver_type: 'dpmsolver'  # 'dpmsolver', 'taylor'
-  dpm_solver_denoise_to_zero: false
+  dpm_solver_denoise_to_zero: true
   use_continuous_time: false
   lower_order_final: true
-  prior_weight_with_guide: 0.97 #0.95
-  n_guide_steps: 2 # ddpmslover_pp=1
-  guide_lr: 0.03 #0.1 ddpmslover_pp=0.03
+  # guidance:
+  prior_weight_with_guide: 1.1 #0.95
+  n_guide_steps: 1 # ddpmslover_pp=1
+  guide_lr: 0.01 #0.1 ddpmslover_pp=0.03
   max_perturb_x: 0.15  # maximum perturbation from the diffusion mean during guide steps
   clip_grad: true
   clip_grad_rule: 'value'  # 'norm', 'value'

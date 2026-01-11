@@ -36,6 +36,15 @@ def _load_args_yaml(path: str) -> Dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def _infer_scenario_label(*, results_root: str, args_inference: Dict[str, Any]) -> str:
+    env_id_replace = args_inference.get("env_id_replace", None)
+    if env_id_replace not in (None, False):
+        token = str(env_id_replace).strip().lower()
+        if token and token not in ("none", "null", "false"):
+            return "scene02"
+    return "scene02" if "replace" in (results_root or "").lower() else "scene01"
+
+
 def _find_results_files(results_root: str) -> List[Tuple[str, str]]:
     hits = []
     for root, _, files in os.walk(results_root):
@@ -64,6 +73,7 @@ def main() -> None:
             continue
 
         args_yaml = _load_args_yaml(os.path.join(run_dir, "args_inference.yaml"))
+        scenario = _infer_scenario_label(results_root=args.results_root, args_inference=args_yaml)
         run_tag = os.path.basename(os.path.dirname(run_dir))
         seed = os.path.basename(run_dir)
 
@@ -120,6 +130,8 @@ def main() -> None:
         smoothness_best = _to_float(getattr(getattr(metrics, "trajs_best", None), "smoothness", None))
 
         row = {
+            "scenario": scenario,
+            "env_id_replace": _safe_get(args_yaml, "env_id_replace", ""),
             "run_tag": run_tag,
             "seed": seed,
             "result_file": os.path.basename(result_path),
