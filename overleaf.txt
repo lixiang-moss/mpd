@@ -1,0 +1,275 @@
+\section{abstract}
+
+
+
+Diffusion-based motion planners such as Motion Planning Diffusion (MPD) can generate collision-free robot motions, but iterative denoising is slow. This thesis evaluates ordinary differential equation (ODE)-based DPM-Solver and DPM-Solver++ (DPM-Solver/++) samplers to reduce end-to-end planning time within an otherwise fixed MPD pipeline. Several solver variants are ported and screened to select a stable default; inference-time hyperparameters are then tuned for the selected variant, and only this tuned solver is compared against Denoising Diffusion Implicit Models (DDIM). Results are reported as success and trajectory quality versus end-to-end inference time.
+
+
+
+
+\section{Introduction}
+Generative diffusion models, e.g., Denoising Diffusion Probabilistic Models (DDPM) \cite{ho2020ddpm}, are attractive for manipulator motion planning because they can represent multi-modal trajectory distributions. \emph{MPD} shows that a learned diffusion prior, combined with collision-aware guidance, can produce feasible collision-free motions in novel scenes \cite{carvalho2023mpd}. A major barrier to practical deployment is speed: diffusion-based planners typically require many iterative denoising steps, making inference slower than classical motion planners (e.g., Rapidly-exploring Random Tree Star (RRT*) and Covariant Hamiltonian Optimization for Motion Planning (CHOMP))~\cite{karaman2011sampling,ratliff2009chomp}. For time-sensitive applications, it is therefore important to understand the trade-off between motion quality and computation time.
+
+Accelerated samplers aim to reduce latency without severely degrading quality. DDIM \cite{song2021ddim} performs deterministic implicit sampling that often works well with fewer denoising iterations. Higher-order ODE-based methods such as DPM-Solver/++ \cite{lu2022dpmsolver,lu2022dpmsolverpp} leverage the probability flow ODE to take larger integration steps with controlled error. However, directly applying higher-order solvers to manipulator motion planning is not always straightforward: the guidance terms and collision constraints used in planning can make the sampling dynamics more sensitive, and some solver variants may become unstable under tight time constraints.
+
+Therefore, this thesis does not treat ``DPM-Solver/++'' as a single drop-in replacement. Instead, it adopts a staged research strategy. First, DPM-Solver/++ variants are ported into MPD and compared in a systematic solver-variant study to determine which configuration best balances speed and stability for motion planning. Second, the selected configuration is tuned using a small tuning set. Third, the tuned solver is compared against DDIM using like-for-like evaluation, holding the diffusion model, guidance, and tasks fixed and reporting results in terms of end-to-end wall-clock planning time (including guidance and collision checking). This design aims to produce conclusions that are both rigorous and practically useful within the scope of an undergraduate thesis.
+
+\textbf{Problem Statement.}
+Within a fixed MPD planner, which DPM-Solver/++ configuration (order and step strategy) is most suitable for motion planning, and how much end-to-end speedup can the selected and tuned solver provide over DDIM without sacrificing success/validity and trajectory quality? As task difficulty increases, does the preferred configuration change and does the advantage persist?
+
+\section{Research Questions }
+
+  \textbf{RQ1 (solver selection). }Within the DPM-Solver++ family, how do different solver orders and step strategies (e.g., single-step vs.\ multi-step) behave in motion planning under a fixed sampling-iteration setting, and which configuration yields the best balance of success/validity, stability, and end-to-end planning time?\\
+  \textbf{RQ2 (tuned comparison). }After selecting and tuning the best-performing DPM-Solver++ configuration, how does it compare to DDIM in success/validity and trajectory quality when compared at similar end-to-end planning time?\\
+  \textbf{RQ3 (difficulty effect). }As task difficulty increases, does the tuned DPM-Solver++ configuration maintain its advantage over DDIM, and how do the speed--quality knee points shift across difficulty levels?\\[4pt]
+
+  \textbf{Research Hypotheses.}
+  \begin{itemize}[leftmargin=*]
+    \item \textbf{H1.} The second-order multi-step (2M) DPM-Solver++ variant provides the best trade-off between convergence speed and sampling stability for motion planning under time constraints.
+    \item \textbf{H2.} After tuning, the selected DPM-Solver++ configuration achieves similar success/quality to DDIM at lower end-to-end planning time, and its knee point occurs at lower time.
+    \item \textbf{H3.} As task difficulty increases, all methods degrade; the advantage of the selected DPM-Solver++ configuration may shrink, but it remains beneficial in at least part of the latency range.
+  \end{itemize}
+
+
+
+\section{Objectives}
+The overall objective of this thesis is to port, select, and tune DPM-Solver/++ configuration for diffusion-based motion planning in MPD, and to quantify its latency--quality trade-off relative to DDIM under practical time constraints. To this end, the thesis pursues the following specific objectives:\\
+
+  \textbf{O1. Sampler porting and a fair evaluation setup.} Port the DPM-Solver/++ variants into MPD with a modular sampler interface, and standardize end-to-end timing and logging so that different samplers can be compared under fixed model weights, guidance, and task definitions.\\
+  \textbf{O2. Solver-family variant study and selection.} Conduct a systematic solver-variant study over DPM-Solver/++ configurations (solver order and step strategy) under a controlled evaluation setup, and select a default configuration that is both stable and efficient for motion planning.\\
+  \textbf{O3. Tuning of the selected solver.} Tune a small set of inference hyperparameters (solver and planning-related settings) for the selected configuration on a small tuning set (a fixed subset of representative scenarios/contexts used only for parameter selection and debugging), and then freeze the setting to ensure a fair final benchmark comparison.\\
+  \textbf{O4. Like-for-like benchmark comparison and guidelines.} Compare the tuned DPM-Solver++ configuration against DDIM across a benchmark difficulty gradient, and summarize results as speed--quality curves, knee points, and simple rules for choosing operating points under time constraints.\\
+  %\textbf{O5. Open-source evaluation toolkit.} Package and release the evaluation code, configurations, and logs as an open-source suite, enabling reproducibility and straightforward extension to additional samplers and planners.
+
+
+
+\section{Expected Contributions}
+
+  \textbf{A DPM-Solver++ port for MPD (engineering contribution).} \\A working integration of DPM-Solver/++ variants into MPD with consistent timing/logging, enabling controlled evaluation within a fixed planner and model.\\
+  \textbf{Evidence-based solver selection within DPM-Solver/++.} \\A solver-variant study that compares solver order and step strategies and motivates a default choice for motion planning, including failure modes observed for less stable variants.\\
+  \textbf{Tuned operating profile and sensitivity notes.} \\A tuned and frozen configuration for the selected solver together with a short sensitivity analysis that clarifies which settings matter most for stability and speed in planning.\\
+  \textbf{DDIM comparison and practical guidelines.}\\ A like-for-like comparison between the tuned DPM-Solver++ configuration and DDIM on a benchmark difficulty gradient, summarized as time--success and time--quality curves, knee points, and operating-point recommendations under time constraints.
+
+
+
+
+
+
+\section{Methodology}
+\subsection{System, Planner, and Guidance}
+
+Across all experiments, the diffusion model (architecture and weights), the manipulator and environment setup, and the MPD planning pipeline (trajectory sampling, guidance, collision checking, and final selection) remain unchanged; only the sampler configuration is varied. Collision avoidance, goal satisfaction, and other task-specific constraints are handled by a fixed set of cost/constraint terms that are kept identical across conditions, so that performance differences can be primarily attributed to the sampler choice. 
+%End-to-end wall-clock planning time is measured from the start of sampling to the final collision-checked trajectory, including guidance and collision checking, to reflect practical deployment latency. 
+Since the internal iteration parameter is not directly comparable across samplers in MPD, results are primarily analyzed as a function of end-to-end planning time.
+\subsection{Samplers, Solver Variants, and Time-Budget Evaluation}
+We use DDIM \cite{song2021ddim} as the baseline sampler and study the DPM-Solver/++ \cite{lu2022dpmsolver,lu2022dpmsolverpp} as the main acceleration candidate. Importantly, DPM-Solver++ is a \emph{family} of configurations, with key design choices such as solver order (e.g., 1st/2nd/3rd) and step strategy (single-step versus multi-step). The thesis is organized around this fact:
+
+\textbf{Phase I (selection via variant study):} Implement multiple DPM-Solver++ variants in MPD and compare them in a representative medium-difficulty planning setting while keeping other planner settings fixed and using a fixed sampling-iteration setting. This phase answers RQ1 and selects a default variant.
+
+\textbf{Phase II (tuning):} Tune a small set of solver/planning-related settings for the selected variant on a small tuning set (a fixed subset of representative scenarios/contexts used only for parameter selection and debugging), then freeze the configuration to ensure a fair final comparison.
+
+\textbf{Phase III (benchmark comparison):} Compare the tuned DPM-Solver++ variant against DDIM across a range of operating points, reporting success/validity, trajectory quality, and end-to-end wall-clock planning time.
+
+
+Across all phases, comparisons are \emph{paired} and \emph{end-to-end}: for each scenario we reuse the same set of valid start--goal contexts across all conditions, and we generate operating points via a small sweep of inference hyperparameters (including internal iteration count). The primary horizontal axis is the measured end-to-end wall-clock planning time, recorded from the start of diffusion sampling to the final collision-checked trajectory and \emph{including} guidance and collision checking, to reflect practical deployment latency.
+
+\subsection{Scenario Design and Difficulty Gradient}
+To address RQ3 and realize Objectives O2--O3, we evaluate on an existing benchmark suite provided by the MPD framework \cite{carvalho2023mpd} that contains multiple fixed scenarios spanning an intrinsic difficulty gradient (from relatively easy to more challenging environments). These scenarios cover different obstacle layouts and planning difficulty regimes, and include manipulator tasks with cluttered 3D scenes.
+
+Phase I (solver selection) is conducted on a representative scenario to keep the study manageable and interpretable. Phase III (benchmark comparison) uses the full difficulty gradient to test generality. For each scenario, we use a fixed list of valid start--goal contexts (sampled from a held-out split where applicable) and reuse the same contexts across all conditions to enable paired, like-for-like comparisons.
+
+\subsection{Metrics and Statistical Analysis}
+
+For each experimental conditionand scenario, we compute the following metrics:
+\begin{itemize}
+\item \textbf{Success}: the proportion of trials that produce a valid, collision-free trajectory that reaches the goal within the planning horizon.
+
+\item \textbf{Validity}: the proportion of generated trajectories that satisfy feasibility constraints. 
+
+\item \textbf{Path length}: best trajectory and the mean path length over valid trajectories.
+
+\item \textbf{Path smoothness}: a dedicated smoothness metric reported for the selected/best trajectory.
+
+\item \textbf{End-effector goal error}: position and orientation error of the end-effector at the goal.
+
+\item \textbf{Inference time}: end-to-end planning time, optionally broken down into major components when available.
+\end{itemize}
+
+To answer RQ1--RQ3 and achieve Objectives O2--O4, we perform the following analyses:
+\begin{itemize}
+\item \textbf{Stage-I variant-study summary :} Compare solver variants in terms of success/validity, stability/failure modes, end-effector goal error, and end-to-end planning time to select a stable default configuration.
+
+\item \textbf{Time--performance curves :} For the baseline and the tuned solver configuration, and for each difficulty level, plot success/validity and quality metrics (path length, smoothness, and end-effector goal error) versus end-to-end planning time to reveal speed--quality frontiers.
+
+\item \textbf{Knee-point identification}: Use simple slope-based heuristics on the time--performance curves to identify operating points where marginal gains per unit time drop sharply, and treat these as candidate operating points.
+\item \textbf{Difficulty effect :} Compare how curves and knee points shift across difficulty levels to assess whether solver advantages persist or shrink as tasks become harder.
+\end{itemize}
+
+
+
+\section{Outline}
+
+% Requires \usepackage{enumitem} in the preamble for custom labels.
+\begin{enumerate}[label=\arabic*.]
+  \item Introduction
+    \begin{enumerate}[label=\arabic{enumi}.\arabic*.]
+      \item Motivation
+      \item Problem statement and gap in solver selection / tuning for fast sampling
+      \item Research questions and objectives
+      \item Structure of the thesis
+    \end{enumerate}
+
+  \item Related Work
+    \begin{enumerate}[label=\arabic{enumi}.\arabic*.]
+      \item Diffusion-based motion planning
+      \item Diffusion for decision-making and policies
+      \item Accelerated sampling and distillation in diffusion models
+      \item Benchmarks and evaluation practices 
+      %for diffusion models in manipulator motion planning
+    \end{enumerate}
+
+  \item Foundations
+    \begin{enumerate}[label=\arabic{enumi}.\arabic*.]
+      \item Diffusion models for generative modeling
+      \item Motion planning and trajectory quality
+      \item Collision-aware guidance in diffusion planning
+    \end{enumerate}
+
+  \item Approaches
+    \begin{enumerate}[label=\arabic{enumi}.\arabic*.]
+      \item System setup
+      \item Porting DPM-Solver/++ and solver selection 
+      \item Tuning strategy and matched-time evaluation
+      \item Scenario design and difficulty gradient
+      \item Experimental protocol
+      \item Metrics and analysis plan
+    \end{enumerate}
+
+  \item Experiments
+    \begin{enumerate}[label=\arabic{enumi}.\arabic*.]
+      \item Experimental configuration
+      \item RQ1: DPM-Solver/++ variant study and solver selection
+      \item RQ2: Tuned DPM-Solver/++ vs.\ DDIM 
+      \item RQ3: Effect of difficulty gradient
+      \item Summary of empirical findings
+    \end{enumerate}
+
+  \item Discussion
+    \begin{enumerate}[label=\arabic{enumi}.\arabic*.]
+      \item Interpretation of sampler behavior and trade-offs
+      \item Conservative vs.\ fast-usable operating profiles
+      \item Comparison with classical planners and prior diffusion studies
+      \item Limitations 
+    \end{enumerate}
+
+  \item Conclusion 
+    \begin{enumerate}[label=\arabic{enumi}.\arabic*.]
+      \item Summary of contributions and main findings
+      \item Answers to the research questions
+      \item Future work
+    \end{enumerate}
+\end{enumerate}
+
+
+
+
+\section{Work Plan (12 Weeks)}
+\textbf{W1--W2:} Reproduce baseline MPD results and set up consistent logging/timing for end-to-end planning latency.\\
+\textbf{W3--W5:} Port DPM-Solver/++ variants into MPD; conduct stability testing and method refinement; run the solver-variant study to select the default solver configuration .\\
+\textbf{W6:} Tune inference hyperparameters for the selected solver on a small tuning set; freeze settings and define the final evaluation sweeps.\\
+\textbf{W7--W9:} Benchmark comparison (tuned DPM-Solver++ vs.\ DDIM) across the difficulty gradient; generate tables and plots.\\
+\textbf{W10:} Statistical analysis; synthesize recommendations.\\
+\textbf{W11--W12:} Writing and figures; proofreading; finalize appendix with experimental settings and results.
+
+
+
+
+
+
+
+
+% refs.bib
+
+@inproceedings{ho2020ddpm,
+  author    = {Ho, Jonathan and Jain, Ajay and Abbeel, Pieter},
+  title     = {Denoising Diffusion Probabilistic Models},
+  booktitle = {NeurIPS},
+  year      = {2020}
+}
+@inproceedings{song2021ddim,
+  author    = {Song, Jiaming and Meng, Chenlin and Ermon, Stefano},
+  title     = {Denoising Diffusion Implicit Models},
+  booktitle = {ICLR},
+  year      = {2021}
+}
+@inproceedings{song2021sde,
+  author    = {Song, Yang and Sohl{-}Dickstein, Jascha and Kingma, Diederik P. and Kumar, Abhishek and Ermon, Stefano and Poole, Ben},
+  title     = {Score-based Generative Modeling through Stochastic Differential Equations},
+  booktitle = {ICLR},
+  year      = {2021}
+}
+@inproceedings{karaman2011sampling,
+  author    = {Sertac Karaman and Emilio Frazzoli},
+  title     = {Sampling-based Algorithms for Optimal Motion Planning},
+  booktitle = {IEEE International Conference on Robotics and Automation (ICRA)},
+  year      = {2011},
+  pages     = {5021--5028}
+}
+
+@inproceedings{ratliff2009chomp,
+  author    = {Nathan Ratliff and Matthew Zucker and J. Andrew Bagnell and Siddhartha Srinivasa},
+  title     = {{CHOMP}: Gradient Optimization Techniques for Efficient Motion Planning},
+  booktitle = {IEEE International Conference on Robotics and Automation (ICRA)},
+  year      = {2009},
+  pages     = {489--494}
+}
+
+
+@inproceedings{lu2022dpmsolver,
+  author    = {Lu, Cheng and Zhou, Yupeng and Bao, Fan and Chen, Jianfei and Li, Chongxuan and Zhu, Jun},
+  title     = {{DPM-Solver}: A Fast {ODE} Solver for Diffusion Probabilistic Models},
+  booktitle = {NeurIPS},
+  year      = {2022}
+}
+@article{lu2022dpmsolverpp,
+  author    = {Lu, Cheng and Zhou, Yupeng and Bao, Fan and Dai, Shanshan and Chen, Jianfei and Li, Chongxuan and Zhu, Jun},
+  title     = {{DPM-Solver++}: Fast Solver for Guided Sampling of Diffusion Probabilistic Models},
+  journal   = {arXiv},
+  eprint    = {2211.01095},
+  year      = {2022}
+}
+@article{wolf2025survey,
+  author    = {Wolf, Ruochen and Shi, Yixuan and Liu, Shiqi and Rayyes, Rakan},
+  title     = {Diffusion Models for Robotic Manipulation: A Survey},
+  journal   = {arXiv},
+  eprint    = {2504.08438},
+  year      = {2025}
+}
+@inproceedings{carvalho2023mpd,
+  author    = {Carvalho, Jos{\'e} and Le, Anh{-}Tai and Baierl, Michael and Koert, Dirk and Peters, Jan},
+  title     = {Motion Planning Diffusion: Learning and Planning of Robot Motions with Diffusion Models},
+  booktitle = {IROS},
+  year      = {2023},
+  eprint    = {2308.01557}
+}
+@inproceedings{saha2024edmp,
+  author    = {Saha, Kaustubh and Mandadi, Venkata Rahul and Reddy, Jashwanth and others},
+  title     = {{EDMP}: Ensemble-of-costs-guided Diffusion for Motion Planning},
+  booktitle = {ICRA},
+  year      = {2024}
+}
+@article{huang2024diffusionseeder,
+  author    = {Huang, Han and Sundaralingam, Balakumar and Mousavian, Arsalan and Murali, Abhishek and Goldberg, Ken and Fox, Dieter},
+  title     = {DiffusionSeeder: Seeding Motion Optimization with Diffusion for Rapid Motion Planning},
+  journal   = {arXiv},
+  eprint    = {2410.16727},
+  year      = {2024},
+  note      = {CoRL 2024}
+}
+@article{sandra2025campd,
+  author    = {Sandra, Elias and Vanroye, Lennert and Dirckx, Dirk and Cartuyvels, Robbe and Swevers, Jan and Decr{\'e}, Willem},
+  title     = {Accelerated Multi-Modal Motion Planning using Context-Conditioned Diffusion Models},
+  journal   = {arXiv},
+  eprint    = {2510.14615},
+  year      = {2025}
+}

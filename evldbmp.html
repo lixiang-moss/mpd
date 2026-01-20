@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MPD 评估框架（CODEX）</title>
+    <style>
+        :root {
+            --bg-grey: #f2f2f2;
+            --bg-blue-light: #e8f0fe;
+            --bg-blue-border: #aecbfa;
+            --bg-green-light: #e6f4ea;
+            --bg-green-border: #ceead6;
+            --bg-orange-light: #feefc3;
+            --bg-orange-border: #fce8b2;
+            --text-dark: #202124;
+            --border-color: #5f6368;
+            --connector-thickness: 2px;
+            --flow-connector-length: 18px;
+            --input-connector-length: 24px;
+            --h-connector-head-w: 8px;
+            --h-connector-head-h: 6px;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #fff;
+            color: var(--text-dark);
+            margin: 0;
+            padding: 14px;
+            font-size: 11px;
+        }
+
+        /* Main Layout */
+        .container {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+            align-items: flex-start;
+            justify-content: center;
+            min-width: 1200px; /* Ensure layout doesn't break on small screens */
+        }
+
+        .col {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* General Box Styles */
+        .box {
+            background: #fff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 9px;
+            text-align: center;
+            margin-bottom: 10px;
+            position: relative;
+        }
+
+        .title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+
+        .subtitle {
+            font-weight: bold;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+
+        .desc {
+            font-size: 0.85em;
+            color: #444;
+        }
+
+        /* Left Column: INPUTS */
+        .inputs-col {
+            width: 200px;
+            background-color: var(--bg-grey);
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 10px;
+            position: relative;
+        }
+
+        .input-item {
+            background: #e0e0e0;
+            border: 1px solid #999;
+            border-radius: 14px;
+            padding: 7px;
+            margin: 6px 0;
+            font-weight: 600;
+        }
+
+        .inputs-col::after {
+            content: "";
+            position: absolute;
+            top: 52%;
+            left: 100%;
+            width: var(--input-connector-length);
+            height: var(--connector-thickness);
+            background: #555;
+            transform: translateY(-50%);
+            pointer-events: none;
+        }
+
+        .inputs-col::before {
+            content: "";
+            position: absolute;
+            top: 52%;
+            left: calc(100% + var(--input-connector-length));
+            transform: translateY(-50%);
+            border-left: var(--h-connector-head-w) solid #555;
+            border-top: var(--h-connector-head-h) solid transparent;
+            border-bottom: var(--h-connector-head-h) solid transparent;
+            pointer-events: none;
+        }
+
+        /* Middle Column: FRAMEWORK */
+        .framework-col {
+            flex: 2;
+            background-color: var(--bg-blue-light);
+            border: 2px solid var(--bg-blue-border);
+            border-radius: 10px;
+            padding: 14px 16px;
+            position: relative;
+        }
+
+        .framework-flow {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            gap: 15px;
+            margin-top: 14px;
+            align-items: flex-start;
+        }
+
+        .flow-step {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .blue-box {
+            --accent: #4285f4;
+            border: 2px solid var(--accent);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 12px 10px;
+            margin-bottom: 0;
+            min-height: 210px;
+        }
+
+        .v-arrow {
+            --arrow-color: #555;
+            width: 0;
+            height: 18px;
+            border-left: var(--connector-thickness) solid var(--arrow-color);
+            margin: 8px auto;
+            position: relative;
+        }
+
+        .v-arrow::after {
+            content: "";
+            position: absolute;
+            left: calc(-1 * var(--h-connector-head-h));
+            bottom: calc(-1 * var(--h-connector-head-h));
+            border-top: var(--h-connector-head-h) solid var(--arrow-color);
+            border-left: var(--h-connector-head-h) solid transparent;
+            border-right: var(--h-connector-head-h) solid transparent;
+        }
+
+        .dashed-arrow::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            bottom: calc(-1 * var(--h-connector-head-h));
+            transform: translateX(-50%);
+            border-top: var(--h-connector-head-h) solid #777;
+            border-left: var(--h-connector-head-h) solid transparent;
+            border-right: var(--h-connector-head-h) solid transparent;
+        }
+
+        .dashed-arrow {
+            height: 44px;
+            margin: 8px 0;
+            position: relative;
+            align-self: center;
+        }
+
+        .dashed-arrow::before {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 0;
+            height: 100%;
+            transform: translateX(-50%);
+            border-left: var(--connector-thickness) dashed #777;
+        }
+
+        .data-table-icon {
+            font-size: 24px;
+            margin-top: 5px;
+        }
+
+        /* Right Column: PLANS */
+        .plans-col {
+            width: 300px;
+            background-color: var(--bg-grey);
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 8px;
+        }
+
+        .plan-section {
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 12px;
+        }
+
+        .plan-a {
+            background-color: var(--bg-green-light);
+            border: 1px solid var(--bg-green-border);
+        }
+
+        .plan-b {
+            background-color: var(--bg-orange-light);
+            border: 1px solid var(--bg-orange-border);
+        }
+
+        .plan-step {
+            background: rgba(255,255,255,0.6);
+            border: 1px solid #999;
+            border-radius: 14px;
+            padding: 5px 6px;
+            margin: 4px 0;
+            font-size: 0.88em;
+        }
+        
+        .arrow-down {
+            height: 14px;
+            margin: 2px 0;
+            position: relative;
+        }
+
+        .arrow-down::before {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 0;
+            height: 100%;
+            transform: translateX(-50%);
+            border-left: var(--connector-thickness) solid #555;
+        }
+
+        .arrow-down::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            bottom: calc(-1 * var(--h-connector-head-h));
+            transform: translateX(-50%);
+            border-top: var(--h-connector-head-h) solid #555;
+            border-left: var(--h-connector-head-h) solid transparent;
+            border-right: var(--h-connector-head-h) solid transparent;
+        }
+
+        .goal-text {
+            font-size: 0.75em;
+            font-style: italic;
+            text-align: left;
+            margin: 4px 0;
+            padding-left: 5px;
+            border-left: 2px solid #666;
+        }
+
+        /* Connector Arrows (Simulated) */
+        .arrow-right::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 100%;
+            width: var(--flow-connector-length);
+            height: var(--connector-thickness);
+            background: var(--accent, #555);
+            transform: translateY(-50%);
+            z-index: 1;
+        }
+
+        .arrow-right::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: calc(100% + var(--flow-connector-length));
+            transform: translateY(-50%);
+            border-left: var(--h-connector-head-w) solid var(--accent, #555);
+            border-top: var(--h-connector-head-h) solid transparent;
+            border-bottom: var(--h-connector-head-h) solid transparent;
+            z-index: 1;
+        }
+
+        .mpd-box {
+            width: 82%;
+            margin: 0 auto;
+            background: #f5f5f5;
+            border: 2px solid #5f6368;
+        }
+        /* Hide right arrow for last item */
+        .framework-flow > .flow-step:last-child .arrow-right::after,
+        .framework-flow > .flow-step:last-child .arrow-right::before {
+            content: none;
+            display: none;
+        }
+
+        h2, h3 {
+            margin: 0 0 8px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <div class="col inputs-col">
+        <h3>输入：<br>Hydra 配置（YAML）</h3>
+        <div class="input-item">场景集合</div>
+        <div class="input-item">采样器与超参数</div>
+        <div class="input-item">搜索空间（网格/Optuna）</div>
+        <div class="input-item">实验开关</div>
+    </div>
+
+    <div class="col framework-col">
+        <h2>MPD 评估框架（CODEX）</h2>
+        
+        <div class="framework-flow">
+            <div class="flow-step">
+                <div class="box blue-box arrow-right">
+                    <div class="title">配置与编排</div>
+                    <div class="desc">（Hydra）</div>
+                    <div class="v-arrow"></div>
+                    <div class="subtitle">实验任务</div>
+                    <div class="desc">（采样器 + 参数 + 场景）</div>
+                </div>
+            </div>
+
+            <div class="flow-step">
+                <div class="box blue-box arrow-right">
+                    <div class="title">MPD 运行适配器</div>
+                    <div class="desc">（子进程/CLI）</div>
+                    <div class="v-arrow"></div>
+                    <div class="subtitle">调用 MPD</div>
+                    <div class="desc">（inference.py）</div>
+                </div>
+                <div class="dashed-arrow"></div>
+                <div class="box mpd-box">
+                    <div class="title">MPD</div>
+                    <div class="desc">（黑箱：inference.py）</div>
+                    <hr>
+                    <div class="desc">n 次试验<br>（内部循环）</div>
+                    <hr>
+                    <div class="desc">标准输出 / 结果文件</div>
+                </div>
+            </div>
+
+            <div class="flow-step">
+                <div class="box blue-box arrow-right">
+                    <div class="title">结果收集与归一化</div>
+                    <div class="v-arrow"></div>
+                    <div class="subtitle">原始指标</div>
+                    <div class="desc">（success, path_len, t_infer 等）</div>
+                    <div class="data-table-icon">📅</div>
+                    <div class="desc">长表 CSV/Parquet</div>
+                </div>
+            </div>
+
+            <div class="flow-step">
+                <div class="box blue-box arrow-right" style="--accent: #9c27b0;">
+                    <div class="title">汇总与分析</div>
+                    <div class="v-arrow"></div>
+                    <div class="desc">按以下维度分组<br>（采样器、参数、场景）</div>
+                    <div class="v-arrow"></div>
+                    <div class="subtitle">统计量</div>
+                    <div class="desc">（均值、方差、置信区间、比率）</div>
+                </div>
+            </div>
+
+            <div class="flow-step">
+                <div class="box blue-box" style="--accent: #9c27b0;">
+                    <div class="title">报告与可视化</div>
+                    <div class="v-arrow"></div>
+                    <div class="subtitle">汇总表</div>
+                    <div class="desc">（排名、对比）</div>
+                    <br>
+                    <div class="subtitle">图表</div>
+                    <div class="desc">（曲线、柱状、雷达）</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col plans-col">
+        <h3>评估计划<br>（执行策略）</h3>
+
+        <div class="plan-section plan-a">
+            <div class="subtitle">计划 A：单场景调参</div>
+            <div class="plan-step">选择代表性场景</div>
+            <div class="arrow-down" aria-hidden="true"></div>
+            <div class="plan-step">遍历候选参数组合（每组 n 次试验）</div>
+            <div class="arrow-down" aria-hidden="true"></div>
+            <div class="plan-step">按成功阈值过滤（&lt;0.9）</div>
+            
+            <div class="goal-text">目标：为单个场景中的某个采样器找到最优/稳定参数。</div>
+
+            <div class="arrow-down" aria-hidden="true"></div>
+            <div class="plan-step">按 t_inference 升序排序</div>
+            <div class="arrow-down" aria-hidden="true"></div>
+            <div class="plan-step">平局处理（有效性、质量）</div>
+            <div class="arrow-down" aria-hidden="true"></div>
+            <div class="plan-step" style="font-weight:bold;">输出：每个采样器的最佳配置</div>
+        </div>
+
+        <div class="plan-section plan-b">
+            <div class="subtitle">计划 B：多采样器对比</div>
+            <div class="plan-step" style="background:#fff3e0;">输入：最佳配置（来自计划 A）+ 6 个多样场景</div>
+            <div class="arrow-down" aria-hidden="true"></div>
+            <div class="plan-step" style="background:#fff3e0;">运行完整评估套件（每种组合 n 次试验）</div>
+            <div class="arrow-down" aria-hidden="true"></div>
+            <div class="plan-step" style="background:#fff3e0;">收集并汇总统一指标</div>
+            
+            <div class="goal-text">目标：使用各自最佳配置，在所有场景上比较所有采样器。</div>
+
+            <div class="arrow-down" aria-hidden="true"></div>
+            <div class="plan-step" style="font-weight:bold; background:#fff3e0;">输出：跨采样器/场景的表与图</div>
+        </div>
+    </div>
+
+</div>
+
+</body>
+</html>

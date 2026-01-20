@@ -1,0 +1,36 @@
+
+更新
+
+1.重点从“通过系统的比较不同采样器给出不同情境下的采样器选择策略“变为“开发一套在ROBOTIC MANIPULATION领域为diffusion模型的多种采样器参数自动调优，比较的evaluation工具
+仍然是以 DIFFUSION MODELS FOR ROBOTIC MANIPULATION: A SURVEY中的
+“"Therefore, it is imperative to consider an appropriate trade-off between sample quality and inference time, tailored to the specific task requirements. Still, only a few evaluations exist that compare DDPM-based, DDIM-based, or other samplers for robotic manipulation, and further investigation is required."
+为灵感。为系统比较不同采样器在ROBOTIC MANIPULATION领域的研究做出贡献
+2.从专门针对的mpd的测评工具，转为与mpd项目代码解耦，使用hydra管理
+并且可以仅依靠接口可以evaluation其他类似模型的通用测评工具。
+3.提供了清晰的超参调优规则
+提供了一个较为均衡的评价规则（最好能找个参考论文）将不同的的metrics分类，关键指标以所测评模型的采样器为baseline
+考虑到不同机器人的评价指标侧重点有所不同，本框架也可共其他使用者！！便利！！的自行修改评价指标（交待代码层面的具体措施）
+4.对于评估流程最后的对比各采样器性能部分，除了给出固定的数据表格与图表外
+
+如果想依据结果给出明确的采样器排行，同样出于3中所提到的原因也采取了3中所提到的各种措施
+如给出一个可以供使用者！便利！修改的评价规则
+
+5.原来的mpd下不同采样器比较工作，放在论文后边作为工具开发成功后，验证展示工具成果的一部分，挑选一种模型进行采样器比对分析并给出结论
+
+6.关于复用mpd论文中的场景的公平性
+
+7.在解释不同的机械臂需要不同的评价指标时，最好有论文支撑。比如xx场景下的机械臂注重成功率碰撞，xx场景下如搬运水杯时注重平滑性，手术机器人注重成功率
+
+8.对所有的采样器指标有一个清晰的解释，方便归因分析
+
+9.在评价metrices分类时，可以引用survey中的关于diffusion评价角度的段落！！！
+
+疑问：
+由于参数调优的目标函数是自己设置，论文重点是给出评估方法与工具。(测评框架与mpd的工作重点分配问题)
+1：1 开发框架，并用于mpd分析 1：0.5 仅出于测试框架是否可以正常运行的角度测试mpd
+采样器调优后的表现是否并不是十分重要？
+是否要解释一些东西，比如为什么不内置轨迹评价指标，，，采样器由于接口各不相同所以
+
+
+
+
