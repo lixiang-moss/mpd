@@ -1,0 +1,35 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>测评框架架构与模块职责</title><script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,theme:"default"});</script><style>body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans SC","Microsoft YaHei",Arial,sans-serif;margin:16px}h1{font-size:18px;margin:0 0 10px}p{margin:6px 0 10px;color:#333}.box{border:1px solid #ddd;border-radius:10px;padding:10px;background:#fafafa}</style></head><body><h1>6.2.1 框架架构与模块职责（含输入/输出与MPD接口）</h1><p>把本文件保存为 .html 后用浏览器打开即可渲染（需要联网加载 mermaid）。</p><div class="box"><div class="mermaid">flowchart LR
+  %% ======= Nodes =======
+  H_IN["输入：配置树(YAML) + 命令行override"] --> H["Hydra（配置与实验生成）"]
+  H --> H_OUT["输出：完全展开配置(expanded config) + 配置快照(snapshot)\\n包含：场景集/采样器/超参空间或固定值/预算/seed策略/超时/输出目录规范"]
+  %% Stage A: HPO loop
+  subgraph A["阶段一：每个采样器的超参优化（HPO）"]
+    direction LR
+    H_OUT --> R_IN_A["Runner输入：expanded config + 候选超参(来自HPO)"]
+    HPO_IN["HPO输入：搜索空间 + 目标函数配置 + 历史试验结果(结构化表)"] --> HPO["HPO Controller（仅阶段一）"]
+    HPO --> CAND["输出：下一组候选超参"]
+    CAND --> R_IN_A
+    R_IN_A --> R["Runner/Scheduler（执行调度）"]
+    R --> MPD_IF["接口化调用：MPD inference 子进程(CLI)\\npython inference.py ... --overrides ... --output_dir=run_dir"]
+    MPD_IF --> RUN_DIR["run_dir 产物：stdout/stderr日志 +（可选）结果文件/metrics dump"]
+    RUN_DIR --> P_IN["Parser输入：run_dir(日志/结果文件)"]
+    P_IN --> P["Parser + Store（解析与存储）"]
+    P --> TBL["输出：标准化trial记录(统一schema) → CSV/Parquet\\n同时记录：运行状态/缺失字段"]
+    TBL --> AGG_IN_A["Aggregator输入：结构化结果表（按采样器/难度/场景/seed聚合）"]
+    AGG_IN_A --> AGG["Aggregator/Visualizer（统计分析与可视化）"]
+    AGG --> A_REP["调优报告：收敛曲线/超参与指标关系/时间分解(t_total,t_generator,t_guide)"]
+    TBL --> HPO_IN
+    HPO --> TUNED["阶段一输出：tuned配置(Hydra YAML锁定版) + Top-k候选摘要"]
+  end
+  %% Stage B: Benchmark
+  subgraph B["阶段二：采样器对比评测（使用各自tuned配置）"]
+    direction LR
+    TUNED --> R_IN_B["Runner输入：expanded config（基准场景集） + 各采样器tuned配置"]
+    R_IN_B --> R2["Runner/Scheduler（执行调度）"]
+    R2 --> MPD_IF2["接口化调用：MPD inference 子进程(同一CLI模板)\\n对每个采样器/场景/seed运行"]
+    MPD_IF2 --> RUN_DIR2["run_dir：stdout/stderr +（可选）结果文件"]
+    RUN_DIR2 --> P2["Parser + Store（同一解析schema）"]
+    P2 --> TBL2["结构化结果表（统一schema）"]
+    TBL2 --> AGG2["Aggregator/Visualizer（对比聚合+可视化）"]
+    AGG2 --> B_REP["阶段二输出：对比报告\\n表：均值±方差/CI（按难度/场景分层）\\n图：权衡图/Pareto/时间分解/对比图（可选排行）"]
+  end</div></div></body></html>

@@ -1,0 +1,11 @@
+# planner=mpd：定义“被测系统（MPD）如何被 DMEval 调用”。
+# 注意：入口脚本/工作目录都在这里配置，代码里不写死路径（符合 L1 原则）。
+
+name: mpd
+python: python3
+# entrypoint：MPD 推理入口脚本（相对仓库根目录）。
+entrypoint: mpd-splines-public/scripts/inference/inference.py
+# workdir：子进程的工作目录（cwd），用于让 MPD 内部相对路径生效。
+workdir: mpd-splines-public
+# extra_args：额外透传给入口脚本的命令行参数（少用，优先走 base_cfg/patch）。
+extra_args: []

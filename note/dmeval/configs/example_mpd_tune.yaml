@@ -1,0 +1,54 @@
+defaults:
+  - planner: mpd
+  - objective: simple
+  - scenario: spheres3d
+  - _self_
+
+version: 1
+
+# 建议：从仓库根目录运行 dmeval（workdir: .）
+workdir: .
+
+# pipeline_root 下会产生：
+# - stage1_tune/<scenario_name>/...（调参阶段的运行结果 + best_configs）
+# - stage2_compare/...（对比阶段的运行结果）
+pipeline_root: mpd-splines-public/scripts/inference/logs/dmeval_pipeline_demo
+
+# 这些参数会原样传给 MPD inference.py（experiment_launcher 会按函数签名解析这些参数）
+common_inference_args:
+  selection_start_goal: validation
+  n_start_goal_states: 50
+  save_results_single_plan_low_mem: true
+  device: cuda:0
+
+tune:
+  # Stage I: 在单一场景上调参
+  base_cfg: ${scenario.base_cfg}
+  scenario_name: ${scenario.name}
+
+  seeds: [2]
+
+  # 每个 sampler 的网格搜索空间（dotted key -> values）
+  # 注意：dpm_solver_pp 变体仍然复用 dpm_solver: 配置段，所以 grid key 用 dpm_solver.*
+  samplers:
+    - name: ddpm
+      method: ddpm
+      grid:
+        ddpm.noise_std: [0.7]
+        ddpm.n_guide_steps: [1, 2]
+
+    - name: dpm_solver_pp
+      method: dpm_solver_pp
+      grid:
+        dpm_solver.dpm_solver_steps: [20, 40]
+        dpm_solver.dpm_solver_order: [2]
+        dpm_solver.use_continuous_time: [false, true]
+
+  # 目标函数/可行性约束（先用能跑通的简化版；你后续替换）
+  objective:
+    feasible_fn: ${objective.feasible_fn}
+    score_fn: ${objective.score_fn}
+
+  top_k: 3
+  skip_existing: true
+  dry_run: false

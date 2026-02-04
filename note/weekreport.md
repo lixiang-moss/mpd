@@ -66,3 +66,25 @@
 1.利用mcp自动调参 
 2.分析最终图表或数据并生成分析报告 
 3.自动完成和diffusion模型的接口对接工作。
+
+
+
+
+
+
+
+
+
+
+
+# 周报 1.30
+
+1.ppt链接
+https://docs.google.com/presentation/d/13anetkK295RDjjvcfk62NlUJKmr29wVVkMUQax1DzOw/edit?usp=sharing
+
+后续还会添加评估工具的结构图并进一步完善内容
+
+2.评估工具代码还在构建中
+
+3.在ovearleaf中完善了proposal的contribution
+https://www.overleaf.com/project/68a886b975aba302cc86bf52

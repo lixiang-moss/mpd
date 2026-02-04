@@ -1,0 +1,5 @@
+# Hydra config group: scenario=spheres3d
+
+name: spheres3d
+base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvSpheres3D-RobotPanda_00.yaml
+

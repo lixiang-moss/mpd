@@ -1,0 +1,5 @@
+# Hydra config group: objective=simple
+
+feasible_fn: dmeval.objectives.simple:is_feasible
+score_fn: dmeval.objectives.simple:score
+

@@ -1,0 +1,30 @@
+# objective=lexicographic：
+# - 先做 constraints 阈值过滤（不满足直接淘汰）
+# - 再按 lexicographic_key 做多指标字典序排序
+
+mode: lexicographic
+constraints:
+  # 这些字段来自 candidate_metrics.csv（即 trial 级别聚合后的 *_mean 列）。
+  - field: success_mean
+    op: ge
+    value: 0.8
+  - field: fraction_valid_mean
+    op: ge
+    value: 0.6
+  - field: collision_intensity_mean
+    op: le
+    value: 0.05
+# 可行集合内按以下 key 排序：从上到下优先级依次降低。
+lexicographic_key:
+  - field: success_mean
+    order: desc
+    nan: low
+  - field: collision_intensity_mean
+    order: asc
+    nan: high
+  - field: t_inference_total_mean
+    order: asc
+    nan: high
+  - field: path_length_best_mean
+    order: asc
+    nan: high

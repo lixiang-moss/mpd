@@ -9,6 +9,7 @@ dist/
 build/
 .venv/
 venv/
+.tmp/
 
 # Editors / OS
 .DS_Store

@@ -1,0 +1,26 @@
+version: 1
+
+# 结果根目录：应与 MPD 的 --results_dir 对齐（注意 MPD/experiment_launcher 会自动再加一层 seed 子目录）。
+results_root: mpd-splines-public/scripts/inference/logs/dmeval_example
+
+defaults:
+  # 建议：从仓库根目录运行 `dmeval run`，这样相对路径更直观。
+  workdir: .
+  timeout_sec: 0
+
+jobs:
+  - run_tag: unipc_steps20_order2_ct0
+    seeds: [2]
+    cmd:
+      - python3
+      - mpd-splines-public/scripts/inference/inference.py
+      - --cfg_inference_path
+      - mpd-splines-public/scripts/inference/cfgs/config_EnvSpheres3D-RobotPanda_00.yaml
+      - --results_dir
+      - "{results_root}/{run_tag}"
+      - --seed
+      - "{seed}"
+      - --save_results_single_plan_low_mem
+      - "true"
+      - --device
+      - cuda:0

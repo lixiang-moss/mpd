@@ -1,0 +1,8 @@
+# planner=dummy：用于自检/单测的虚拟 planner。
+# 它会写出 trial_metrics.jsonl，从而验证 Adapter/聚合/排名/绘图等逻辑是否跑通。
+
+name: dummy
+python: python3
+entrypoint: dmeval/scripts/dummy_planner.py
+workdir: .
+extra_args: []

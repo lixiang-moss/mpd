@@ -1,0 +1,5 @@
+# Hydra config group: scenario=warehouse
+
+name: warehouse
+base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvWarehouse-RobotPanda-config_file_v01_00.yaml
+

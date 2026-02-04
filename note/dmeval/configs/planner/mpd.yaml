@@ -1,0 +1,5 @@
+# Hydra config group: planner=mpd
+
+python: python3
+mpd_inference_script: mpd-splines-public/scripts/inference/inference.py
+

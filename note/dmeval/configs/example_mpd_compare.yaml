@@ -1,0 +1,31 @@
+defaults:
+  - planner: mpd
+  # 这里的 scenario 仅用于定位 Stage I 的 best_configs 输出目录（即调参发生在哪个代表性场景上）
+  - scenario: spheres3d
+  - _self_
+
+version: 1
+
+workdir: .
+pipeline_root: mpd-splines-public/scripts/inference/logs/dmeval_pipeline_demo
+
+common_inference_args:
+  selection_start_goal: validation
+  n_start_goal_states: 50
+  save_results_single_plan_low_mem: true
+  device: cuda:0
+
+compare:
+  # Stage II: 使用 Stage I 产出的 best_configs，在多个场景重新跑对比
+  best_configs_root: ${pipeline_root}/stage1_tune/${scenario.name}/_dmeval/best_configs
+
+  scenarios:
+    - name: spheres3d
+      base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvSpheres3D-RobotPanda_00.yaml
+    - name: warehouse
+      base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvWarehouse-RobotPanda-config_file_v01_00.yaml
+
+  seeds: [2]
+  skip_existing: true
+  dry_run: false
+  make_plots: true

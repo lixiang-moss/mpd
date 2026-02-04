@@ -1,0 +1,48 @@
+# dummy 最小闭环配置：
+# - 用 dmeval/scripts/dummy_planner.py 代替 MPD 运行
+# - 用于快速自检/单测（验证 DMEval 的调用链与产物契约）
+
+defaults:
+  - planner: dummy
+  - adapter: mpd
+  - objective: lexicographic
+  - _self_
+
+pipeline:
+  # 单测/自检建议把 root 指向 .tmp/ 下（避免污染正式实验 outputs）。
+  root: outputs/dmeval_dummy_small_${now:%Y-%m-%d_%H-%M-%S}
+  allow_overwrite: false
+
+common_inference_args:
+  selection_start_goal: validation
+  n_start_goal_states: 2
+  save_results_single_plan_low_mem: true
+  device: cpu
+
+tune:
+  enabled: true
+  stage_dir: tune
+  scenario:
+    name: planar2link
+    # 这里的 base_cfg 只是 dummy_planner 用来读取少量字段（并不真正运行 MPD）。
+    base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvPlanar2Link-RobotPlanar2Link_00.yaml
+  seeds: [2]
+  top_k: 1
+  samplers:
+    - name: ddim
+      patch_base:
+        diffusion_sampling_method: ddim
+      search:
+        strategy: grid
+        space:
+          ddim.ddim_sampling_timesteps: [10]
+          ddim.ddim_eta: [0.0]
+
+compare:
+  enabled: true
+  stage_dir: compare
+  best_configs_root: ${pipeline.root}/best_configs
+  seeds: [2]
+  scenarios:
+    - name: planar2link
+      base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvPlanar2Link-RobotPlanar2Link_00.yaml
