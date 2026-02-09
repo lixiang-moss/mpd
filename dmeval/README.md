@@ -10,6 +10,17 @@ planning “planners”) in a two-stage workflow:
 
 ## Quick start
 
+### Smoke test (no MPD required)
+
+Run the full Stage I → Stage II loop with the built-in dummy planner (fast sanity check):
+
+```bash
+PYTHONPATH=dmeval/src python -m dmeval --config dmeval/conf/config_dummy_small.yaml run
+```
+
+This uses `dmeval/scripts/dummy_planner.py`, which writes `trial_metrics.jsonl` in the expected format so the
+adapter/aggregation/ranking/plotting pipeline can be exercised without heavy external dependencies.
+
 
 
 ###  install into your environment
