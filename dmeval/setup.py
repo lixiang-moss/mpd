@@ -1,13 +1,15 @@
 """
-setuptools 兼容入口。
+Setuptools compatibility entrypoint.
 
-背景：
-- 在某些环境里（例如用户站点包不可写/PEP660 不可用），`pip install -e` 可能失败
-- 提供一个最小的 setup.py 可以让部分工具链退回到传统安装路径
+Background:
+- In some environments (e.g., user site-packages not writable / PEP 660 not available),
+  `pip install -e` may fail.
+- A minimal `setup.py` allows some toolchains to fall back to the legacy installation path.
 
-注意：
-- DMEval 推荐的运行方式仍然是：`PYTHONPATH=dmeval/src python -m dmeval.cli ...`
-  这样不依赖安装权限，且更适合在论文复现实验里记录代码版本。
+Note:
+- The recommended way to run DMEval is still:
+  `PYTHONPATH=dmeval/src python -m dmeval ...`
+  This avoids installation permissions and is friendlier for paper/reproducibility workflows.
 """
 
 from setuptools import setup

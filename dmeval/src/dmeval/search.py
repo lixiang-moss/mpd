@@ -1,16 +1,16 @@
 """
-Stage I（tune）里的候选超参生成（SearchStrategy）。
+Candidate generation for Stage I (tune) (SearchStrategy).
 
-设计目标：
-- 提供一个最小但可扩展的候选生成器：grid / random（optuna 预留）
-- 生成的单位是 Candidate：
-  - candidate_id: 稳定的字符串 ID（便于落盘、复现）
-  - patch: 一个 YAML patch dict（会合并到 base_cfg 生成 cfg_inference.yaml）
-  - params_flat: 扁平的参数字典（便于记录/打印/调试）
+Design goals:
+- Provide a minimal but extensible generator: grid / random (optuna reserved)
+- The generated unit is a `Candidate`:
+  - `candidate_id`: stable string ID (for on-disk organization and reproducibility)
+  - `patch`: a YAML patch dict (merged into `base_cfg` to produce `cfg_inference.yaml`)
+  - `params_flat`: flattened params dict (for logging/printing/debugging)
 
-注意：
-- 这里不做任何“评价/排序”，只负责生成候选。
-- 评价单位在 L1 里是 candidate（在 seeds 上完整跑完后再聚合/排名）。
+Notes:
+- This module does not evaluate or rank candidates; it only generates them.
+- In L1, the evaluation unit is the candidate (run across seeds, then aggregated and ranked).
 """
 
 from __future__ import annotations
@@ -18,34 +18,45 @@ from __future__ import annotations
 import itertools
 import math
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Iterable
+
+try:
+    # After Hydra/OmegaConf composition, YAML lists are often `ListConfig` rather than native `list`.
+    from omegaconf import ListConfig  # type: ignore
+except Exception:  # pragma: no cover - optional dependency fallback
+    ListConfig = ()  # type: ignore[assignment]
 
 from .util import merge_patches, nested_dict_from_dotpath
 
 
 @dataclass(frozen=True)
 class Candidate:
-    """一个候选配置（candidate）。"""
+    """One candidate configuration."""
     candidate_id: str
     patch: dict[str, Any]
     params_flat: dict[str, Any]
 
 
 def _as_list(value: Any) -> list[Any]:
-    """把标量转成单元素 list，方便统一处理 grid space。"""
+    """Wrap scalars into a single-item list to normalize grid search spaces."""
     if isinstance(value, list):
         return value
+    if isinstance(value, tuple):
+        return list(value)
+    if ListConfig and isinstance(value, ListConfig):
+        return list(value)
     return [value]
 
 
 def generate_candidates(*, base_patch: dict[str, Any], search_cfg: Any) -> list[Candidate]:
     """
-    根据 search_cfg 生成候选列表。
+    Generate candidates based on `search_cfg`.
 
-    - grid: 传入离散列表，做笛卡尔积
-    - random: 支持离散 choices 或简单的 float/int 分布采样
-    - optuna: 预留接口（当前最小实现未启用）
+    - `grid`: Cartesian product over discrete value lists
+    - `random`: sampling from discrete choices or simple float/int ranges
+    - `optuna`: reserved (not implemented in this minimal build)
     """
     strategy = str(getattr(search_cfg, "strategy", "grid")).lower()
     if strategy == "grid":
@@ -64,8 +75,8 @@ def generate_candidates(*, base_patch: dict[str, Any], search_cfg: Any) -> list[
 
 
 def _grid_candidates(*, base_patch: dict[str, Any], space: Any) -> Iterable[Candidate]:
-    """grid 搜索：对每个参数维度取离散列表，做笛卡尔积。"""
-    if not isinstance(space, dict) or not space:
+    """Grid search: Cartesian product over discrete lists per parameter."""
+    if not isinstance(space, Mapping) or not space:
         yield Candidate(candidate_id="c0000", patch=base_patch, params_flat={})
         return
 
@@ -76,18 +87,18 @@ def _grid_candidates(*, base_patch: dict[str, Any], space: Any) -> Iterable[Cand
         params = dict(zip(keys, combo))
         patch_parts = [base_patch]
         for k, v in params.items():
-            # 把 "a.b.c" 这种 dotpath 参数变成嵌套 dict patch，便于合并到 YAML。
+            # Turn dotpath params like "a.b.c" into nested dict patches for YAML merge.
             patch_parts.append(nested_dict_from_dotpath(str(k), v))
         patch = merge_patches(*patch_parts)
         yield Candidate(candidate_id=f"c{i:04d}", patch=patch, params_flat=params)
 
 
 def _random_candidates(*, base_patch: dict[str, Any], space: Any, n: int, seed: Any) -> Iterable[Candidate]:
-    """random 搜索：按给定分布/choices 采样 n 个候选。"""
+    """Random search: sample `n` candidates from the given distributions/choices."""
     if seed is not None:
         random.seed(int(seed))
 
-    if not isinstance(space, dict) or not space:
+    if not isinstance(space, Mapping) or not space:
         for i in range(n):
             yield Candidate(candidate_id=f"c{i:04d}", patch=base_patch, params_flat={})
         return
@@ -105,12 +116,12 @@ def _random_candidates(*, base_patch: dict[str, Any], space: Any, n: int, seed: 
 
 def _sample_one(spec: Any) -> Any:
     """
-    从一个参数 spec 采样一个值。
+    Sample one value from a parameter spec.
 
-    支持的 spec 形式：
-    - list: 从列表里随机选
+    Supported spec forms:
+    - list: choose uniformly from the list
     - dict:
-      - {"choices": [...]}：离散选项
+      - {"choices": [...]} for discrete options
       - {"type": "int", "low": 1, "high": 10}
       - {"type": "float", "low": 1e-3, "high": 1e-1, "log": true}
     """

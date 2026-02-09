@@ -1,20 +1,21 @@
 """
-Stage II：compare（公平对比阶段）。
+Stage II: compare (fair comparison stage).
 
-职责（对应 `工具描述文档.md`）：
-- 读取 Stage I 产出的 best_configs/<sampler>/best_patch.yaml
-- 对每个 scenario base_cfg 打 patch，生成最终 cfg_inference.yaml
-- 串行运行被测系统：scenario × sampler × seed
-- Collect：抽取 trial 行 → 聚合为 run/agg 指标
-- Rank + Plot：输出排名 CSV 与基础图表
+Responsibilities (per spec):
+- Read Stage-I outputs `best_configs/<sampler>/best_patch.yaml`
+- Apply patches to each scenario base_cfg to generate `cfg_inference.yaml`
+- Run the system-under-test serially: scenario × sampler × seed
+- Collect: extract trial rows → aggregate to run/agg metrics
+- Rank + Plot: write ranking CSVs and basic plots
 
-重要约束：
-- 只串行（不引入并行调度）
-- 不重算指标，只抽取与聚合
+Key constraints:
+- Serial only (no parallel scheduling)
+- No metric recomputation; extraction and aggregation only
 """
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,12 +29,36 @@ from .plotting import plot_stage_compare
 from .runner import run_planner_subprocess
 from .util import cfg_to_yaml_str, ensure_dir, merge_patches, read_yaml, write_text, write_yaml
 
+_LINE = "-" * 72
+
+
+def _log(msg: str) -> None:
+    """Stage-II progress logging."""
+    print(f"[dmeval:compare] {msg}", flush=True)
+
+
+def _fmt_num(value: Any) -> str:
+    """Format a number as a compact string (non-numerics are returned as-is)."""
+    try:
+        return f"{float(value):.4g}"
+    except Exception:
+        return str(value)
+
+
+def _section(title: str) -> None:
+    """Print a section divider for readability."""
+    print(_LINE, flush=True)
+    _log(title)
+    print(_LINE, flush=True)
+
 
 def run_compare(cfg: Any) -> None:
-    """执行 Stage II（compare）。"""
+    """Run Stage II (compare)."""
     if not bool(getattr(cfg.compare, "enabled", True)):
+        _log("skip (compare.enabled=false)")
         return
 
+    started_all = time.monotonic()
     pipeline_root = Path(str(cfg.pipeline.root))
     if not pipeline_root.exists():
         raise FileNotFoundError(
@@ -45,7 +70,7 @@ def run_compare(cfg: Any) -> None:
     if stage_dir.exists():
         if not allow_overwrite:
             raise FileExistsError(f"Refuse to overwrite existing compare directory: {stage_dir}")
-        # compare 目录属于“派生产物”，允许在 allow_overwrite=true 时重建。
+        # `compare/` is a derived artifact directory; allow rebuilding when `allow_overwrite=true`.
         shutil.rmtree(stage_dir)
     ensure_dir(stage_dir)
 
@@ -60,21 +85,29 @@ def run_compare(cfg: Any) -> None:
     sampler_names = _discover_samplers(best_root)
     if not sampler_names:
         raise RuntimeError(f"No samplers found under best_configs_root: {best_root}")
+    _section("STAGE II START")
+    _log(
+        f"start pipeline_root={pipeline_root} scenarios={len(scenarios)} "
+        f"samplers={len(sampler_names)} seeds={seeds}"
+    )
 
-    # trial_rows 仍然是“每个 trial 一行”的统一口径记录（来自 Adapter）。
+    # `trial_rows` is the unified "one row per trial" record format (from the adapter).
     trial_rows: list[dict[str, Any]] = []
 
-    for scenario_cfg in scenarios:
+    for scenario_idx, scenario_cfg in enumerate(scenarios, start=1):
         scenario_name = str(scenario_cfg.name)
         base_cfg_path = Path(str(scenario_cfg.base_cfg))
+        _section(f"SCENARIO {scenario_idx}/{len(scenarios)} | {scenario_name}")
 
-        for sampler_name in sampler_names:
-            # Stage II 的核心输入：Stage I 固化的 best_patch.yaml
+        for sampler_idx, sampler_name in enumerate(sampler_names, start=1):
+            started_pair = time.monotonic()
+            # Core Stage-II input: Stage-I persisted `best_patch.yaml`
             patch_path = best_root / sampler_name / "best_patch.yaml"
             if not patch_path.exists():
+                _log(f"  sampler {sampler_idx}/{len(sampler_names)} name={sampler_name} skip (missing best_patch)")
                 continue
             patch = read_yaml(patch_path)
-            # 生成最终推理配置：scenario 的 base_cfg + sampler 的 best_patch
+            # Build final inference config: scenario base_cfg + sampler best_patch
             merged_cfg = merge_patches(read_yaml(base_cfg_path), patch)
 
             run_dir = stage_dir / scenario_name / sampler_name
@@ -85,24 +118,28 @@ def run_compare(cfg: Any) -> None:
             results_dir = run_dir / "results"
             ensure_dir(results_dir)
 
-            # 串行运行：scenario × sampler × seed
+            # Serial runs: scenario × sampler × seed
             for seed in seeds:
-                run_planner_subprocess(
-                    python=str(cfg.planner.python),
-                    entrypoint=str(cfg.planner.entrypoint),
-                    workdir=Path(str(cfg.planner.workdir)),
-                    cfg_inference_path=cfg_path,
-                    results_dir=results_dir,
-                    seed=seed,
-                    selection_start_goal=str(cfg.common_inference_args.selection_start_goal),
-                    n_start_goal_states=int(cfg.common_inference_args.n_start_goal_states),
-                    save_results_single_plan_low_mem=bool(cfg.common_inference_args.save_results_single_plan_low_mem),
-                    device=str(cfg.common_inference_args.device),
-                    extra_args=list(getattr(cfg.planner, "extra_args", []) or []),
-                    log_path=run_dir / f"seed{seed}.log",
-                )
+                try:
+                    run_planner_subprocess(
+                        python=str(cfg.planner.python),
+                        entrypoint=str(cfg.planner.entrypoint),
+                        workdir=Path(str(cfg.planner.workdir)),
+                        cfg_inference_path=cfg_path,
+                        results_dir=results_dir,
+                        seed=seed,
+                        selection_start_goal=str(cfg.common_inference_args.selection_start_goal),
+                        n_start_goal_states=int(cfg.common_inference_args.n_start_goal_states),
+                        save_results_single_plan_low_mem=bool(cfg.common_inference_args.save_results_single_plan_low_mem),
+                        device=str(cfg.common_inference_args.device),
+                        extra_args=list(getattr(cfg.planner, "extra_args", []) or []),
+                        log_path=run_dir / f"seed{seed}.log",
+                    )
+                except Exception as exc:
+                    _log(f"FAILED scenario={scenario_name} sampler={sampler_name} seed={seed}: {exc}")
+                    raise
 
-            # 抽取产物：由 Adapter 决定读 jsonl 还是 pt
+            # Extract artifacts: adapter decides whether to read JSONL or .pt
             run_tag = sampler_name
             rows = adapter.collect_trial_rows(
                 results_root=results_dir,
@@ -112,10 +149,14 @@ def run_compare(cfg: Any) -> None:
                 candidate_id=None,
             )
             trial_rows.extend(rows)
+            _log(
+                f"{sampler_idx:>3}/{len(sampler_names)} sampler={sampler_name} done trials={len(rows)} "
+                f"elapsed={time.monotonic() - started_pair:.1f}s"
+            )
 
-    # 聚合层次（与论文/规格一致）：
-    # - run_df：按 seed 聚合（scenario × sampler × seed）
-    # - run_agg_df：跨 seed 聚合（scenario × sampler），用于公平比较与绘图/排名
+    # Aggregation levels (aligned with spec/paper terms):
+    # - run_df: aggregated by seed (scenario × sampler × seed)
+    # - run_agg_df: aggregated across seeds (scenario × sampler) for fair comparison/plotting/ranking
     trial_df = to_dataframe(trial_rows)
     run_df = aggregate_mean_std(df=trial_df, group_cols=["scenario", "sampler", "run_tag", "seed"])
     run_agg_df = aggregate_mean_std(df=trial_df, group_cols=["scenario", "sampler", "run_tag"])
@@ -124,6 +165,23 @@ def run_compare(cfg: Any) -> None:
 
     _write_rankings(run_agg_df, out_dir=stage_dir)
     plot_stage_compare(run_metrics_agg=run_agg_df, out_dir=stage_dir / "plots")
+    _log(
+        f"aggregated rows: trial={len(trial_df)} run={len(run_df)} run_agg={len(run_agg_df)} "
+        f"metrics={stage_dir / 'run_metrics.csv'}"
+    )
+    if not run_agg_df.empty:
+        rank_df = run_agg_df.copy()
+        if "success_mean" not in rank_df.columns:
+            rank_df["success_mean"] = float("-inf")
+        if "t_inference_total_mean" not in rank_df.columns:
+            rank_df["t_inference_total_mean"] = float("inf")
+        best_row = rank_df.sort_values(["success_mean", "t_inference_total_mean"], ascending=[False, True]).iloc[0]
+        _log(
+            "best summary: "
+            f"scenario={best_row.get('scenario')} sampler={best_row.get('sampler')} "
+            f"success_mean={_fmt_num(best_row.get('success_mean'))} "
+            f"time_mean={_fmt_num(best_row.get('t_inference_total_mean'))}"
+        )
 
     manifest: dict[str, Any] = {
         "tool": "dmeval",
@@ -143,10 +201,12 @@ def run_compare(cfg: Any) -> None:
     }
     write_yaml(stage_dir / "compare_manifest.yaml", manifest)
     write_text(stage_dir / "DONE_COMPARE.txt", "OK\n")
+    _section("STAGE II END")
+    _log(f"completed in {time.monotonic() - started_all:.1f}s out={stage_dir}")
 
 
 def _build_adapter(cfg: Any) -> MPDAdapter:
-    """构造 Adapter（当前 L1 只实现 MPDAdapter）。"""
+    """Build an adapter (this L1 build implements MPDAdapter only)."""
     adapter_type = str(getattr(cfg.adapter, "type", "mpd")).lower()
     if adapter_type != "mpd":
         raise ValueError(f"Unsupported adapter type: {adapter_type}")
@@ -154,7 +214,7 @@ def _build_adapter(cfg: Any) -> MPDAdapter:
 
 
 def _discover_samplers(best_root: Path) -> list[str]:
-    """从 best_configs_root 下发现有哪些 sampler（以存在 best_patch.yaml 为准）。"""
+    """Discover sampler names under `best_configs_root` (directory must contain `best_patch.yaml`)."""
     out: list[str] = []
     if not best_root.exists():
         return out
@@ -166,25 +226,25 @@ def _discover_samplers(best_root: Path) -> list[str]:
 
 def _write_rankings(run_agg_df: pd.DataFrame, *, out_dir: Path) -> None:
     """
-    输出基础排名 CSV（满足规格里的最低要求）。
+    Write basic ranking CSVs (minimum required by the spec).
 
-    排名口径（越靠前越好）：
-    - success：success_mean 降序，t_inference_total_mean 升序
-    - fraction_valid：fraction_valid_mean 降序，t_inference_total_mean 升序
-    - path_length：path_length_best_mean 升序
-    - speed：t_inference_total_mean 升序
+    Ranking rules (earlier is better):
+    - success: `success_mean` desc, then `t_inference_total_mean` asc
+    - fraction_valid: `fraction_valid_mean` desc, then `t_inference_total_mean` asc
+    - path_length: `path_length_best_mean` asc
+    - speed: `t_inference_total_mean` asc
     """
     if run_agg_df.empty:
         return
 
     def _safe(col: str, default: float) -> pd.Series:
-        # 容错：列缺失/不可转数值时使用 default，保证排序逻辑不会崩。
+        # Robustness: use `default` when column is missing or non-numeric.
         if col not in run_agg_df.columns:
             return pd.Series([default] * len(run_agg_df))
         s = pd.to_numeric(run_agg_df[col], errors="coerce").fillna(default)
         return s
 
-    # 下面通过构造 _k1/_k2 做排序 key；越小越好。
+    # Build `_k1`/`_k2` as ranking keys; smaller is better.
     rank_success = run_agg_df.assign(
         _k1=-_safe("success_mean", -1.0),
         _k2=_safe("t_inference_total_mean", float("inf")),

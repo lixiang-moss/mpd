@@ -1,11 +1,12 @@
 """
-Adapter 层包。
+Adapter layer package.
 
-Adapter 的职责：
-- 面向“被测系统的产物目录”做解析（discover/load/extract）
-- 输出统一字段口径的 trial 行 dict，供 DMEval 聚合/排名/绘图
+Adapters are responsible for:
+- Parsing the system-under-test's artifact directory (discover/load/extract)
+- Emitting per-trial row dicts with a unified field schema for aggregation/ranking/plotting
 
-当前 L1 首个适配器是 MPDAdapter；未来新增其它 planner 时，建议在此目录新增对应文件。
+In this L1 build, the first adapter is `MPDAdapter`. When adding support for other planners,
+add new adapter modules in this directory.
 """
 
 from .mpd import MPDAdapter

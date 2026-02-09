@@ -1,20 +1,21 @@
 """
-Stage I：tune（调参阶段）。
+Stage I: tune (hyperparameter tuning stage).
 
-职责（对应 `工具描述文档.md`）：
-- 对每个 sampler 生成候选 candidates（grid/random/optuna）
-- 串行运行被测系统：candidate × seed（每次 run 内含 N trials）
-- Collect：抽取 trial 行 → 聚合为 run/candidate 指标
-- Objective：阈值过滤 + 排序/评分，选择 best/top-k
-- 输出 best_configs/<sampler>/{best_patch.yaml,best.yaml,topk.yaml} + tune_manifest.yaml
+Responsibilities (per spec):
+- Generate candidate patches for each sampler (grid/random/optuna reserved)
+- Run the system-under-test serially: candidate × seed (each run contains N trials)
+- Collect: extract trial rows → aggregate to run/candidate metrics
+- Objective: constraints filtering + ranking/scoring to select best/top-k
+- Output `best_configs/<sampler>/{best_patch.yaml,best.yaml,topk.yaml}` plus `tune_manifest.yaml`
 
-重要约束：
-- 只串行（不引入并行调度）
-- 不重算指标，只抽取与聚合
+Key constraints:
+- Serial only (no parallel scheduling)
+- No metric recomputation; extraction and aggregation only
 """
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,13 +26,37 @@ from .runner import run_planner_subprocess
 from .search import generate_candidates
 from .util import cfg_to_yaml_str, ensure_dir, ensure_empty_dir, merge_patches, read_yaml, write_text, write_yaml
 
+_LINE = "-" * 72
+
+
+def _log(msg: str) -> None:
+    """Stage-I progress logging."""
+    print(f"[dmeval:tune] {msg}", flush=True)
+
+
+def _fmt_num(value: Any) -> str:
+    """Format a number as a compact string (non-numerics are returned as-is)."""
+    try:
+        return f"{float(value):.4g}"
+    except Exception:
+        return str(value)
+
+
+def _section(title: str) -> None:
+    """Print a section divider for readability."""
+    print(_LINE, flush=True)
+    _log(title)
+    print(_LINE, flush=True)
+
 
 def run_tune(cfg: Any) -> None:
-    """执行 Stage I（tune）。"""
+    """Run Stage I (tune)."""
     if not bool(getattr(cfg.tune, "enabled", True)):
+        _log("skip (tune.enabled=false)")
         return
 
-    # pipeline.root 是所有输出的根目录；默认拒绝覆盖，避免实验结果被意外抹掉。
+    started_all = time.monotonic()
+    # `pipeline.root` is the root for all outputs; default is to refuse overwrites to protect results.
     pipeline_root = Path(str(cfg.pipeline.root))
     allow_overwrite = bool(getattr(cfg.pipeline, "allow_overwrite", False))
     ensure_empty_dir(pipeline_root, allow_overwrite=allow_overwrite)
@@ -39,7 +64,7 @@ def run_tune(cfg: Any) -> None:
     stage_dir = pipeline_root / str(getattr(cfg.tune, "stage_dir", "tune"))
     ensure_dir(stage_dir)
 
-    # Stage I 产出会写入 best_configs，供 Stage II 复用。
+    # Stage-I outputs write to `best_configs/` for Stage II reuse.
     best_root = pipeline_root / "best_configs"
     ensure_dir(best_root)
 
@@ -49,6 +74,12 @@ def run_tune(cfg: Any) -> None:
     base_cfg_path = Path(str(cfg.tune.scenario.base_cfg))
     seeds = [int(s) for s in list(cfg.tune.seeds)]
     top_k = int(getattr(cfg.tune, "top_k", 1))
+    samplers = list(cfg.tune.samplers)
+    _section("STAGE I START")
+    _log(
+        f"start pipeline_root={pipeline_root} scenario={scenario_name} "
+        f"samplers={len(samplers)} seeds={seeds} top_k={top_k}"
+    )
 
     manifest: dict[str, Any] = {
         "tool": "dmeval",
@@ -67,9 +98,10 @@ def run_tune(cfg: Any) -> None:
         "resolved_config_yaml": cfg_to_yaml_str(cfg),
     }
 
-    # “一键调优多个采样器”：按 tune.samplers 顺序串行跑完。
-    for sampler_cfg in list(cfg.tune.samplers):
+    # "Tune multiple samplers in one go": run serially in the order of `tune.samplers`.
+    for sampler_idx, sampler_cfg in enumerate(samplers, start=1):
         sampler_name = str(sampler_cfg.name)
+        started_sampler = time.monotonic()
         sampler_dir = stage_dir / sampler_name
         ensure_dir(sampler_dir)
         candidates_dir = sampler_dir / "candidates"
@@ -78,46 +110,52 @@ def run_tune(cfg: Any) -> None:
         base_patch = _to_plain(getattr(sampler_cfg, "patch_base", {})) or {}
         search_cfg = getattr(sampler_cfg, "search", None)
         candidates = generate_candidates(base_patch=base_patch, search_cfg=search_cfg)
+        _section(f"SAMPLER {sampler_idx}/{len(samplers)} | {sampler_name} | candidates={len(candidates)}")
 
-        # trial_rows 是“每个 trial 一行”的统一口径记录（来自 Adapter）。
+        # `trial_rows` is the unified "one row per trial" record format (from the adapter).
         trial_rows: list[dict[str, Any]] = []
 
-        for cand in candidates:
+        for cand_idx, cand in enumerate(candidates, start=1):
+            started_cand = time.monotonic()
             cand_dir = candidates_dir / cand.candidate_id
             ensure_dir(cand_dir)
 
-            # 1) 把 patch 落盘，便于复现与调试
+            # 1) Persist patch for reproducibility/debugging
             patch_path = cand_dir / "patch.yaml"
             write_yaml(patch_path, cand.patch)
 
-            # 2) 生成本次 candidate 的推理配置：base_cfg + patch
+            # 2) Build this candidate's inference config: base_cfg + patch
             merged_cfg = read_yaml(base_cfg_path)
             merged_cfg = merge_patches(merged_cfg, cand.patch)
             cfg_path = cand_dir / "cfg_inference.yaml"
             write_yaml(cfg_path, merged_cfg)
 
-            # 3) results_dir 由 DMEval 管理；planner 可能会在里面创建 seed 子目录。
+            # 3) `results_dir` is managed by DMEval; planner may create a seed subdirectory inside.
             results_dir = cand_dir / "results"
             ensure_dir(results_dir)
 
-            # 4) 串行运行：candidate × seed
+            # 4) Serial runs: candidate × seed
             for seed in seeds:
-                run_planner_subprocess(
-                    python=str(cfg.planner.python),
-                    entrypoint=str(cfg.planner.entrypoint),
-                    workdir=Path(str(cfg.planner.workdir)),
-                    cfg_inference_path=cfg_path,
-                    results_dir=results_dir,
-                    seed=seed,
-                    selection_start_goal=str(cfg.common_inference_args.selection_start_goal),
-                    n_start_goal_states=int(cfg.common_inference_args.n_start_goal_states),
-                    save_results_single_plan_low_mem=bool(cfg.common_inference_args.save_results_single_plan_low_mem),
-                    device=str(cfg.common_inference_args.device),
-                    extra_args=list(getattr(cfg.planner, "extra_args", []) or []),
-                    log_path=cand_dir / f"seed{seed}.log",
-                )
+                try:
+                    run_planner_subprocess(
+                        python=str(cfg.planner.python),
+                        entrypoint=str(cfg.planner.entrypoint),
+                        workdir=Path(str(cfg.planner.workdir)),
+                        cfg_inference_path=cfg_path,
+                        results_dir=results_dir,
+                        seed=seed,
+                        selection_start_goal=str(cfg.common_inference_args.selection_start_goal),
+                        n_start_goal_states=int(cfg.common_inference_args.n_start_goal_states),
+                        save_results_single_plan_low_mem=bool(cfg.common_inference_args.save_results_single_plan_low_mem),
+                        device=str(cfg.common_inference_args.device),
+                        extra_args=list(getattr(cfg.planner, "extra_args", []) or []),
+                        log_path=cand_dir / f"seed{seed}.log",
+                    )
+                except Exception as exc:
+                    _log(f"FAILED candidate={cand.candidate_id} seed={seed}: {exc}")
+                    raise
 
-            # 5) 抽取产物：优先 jsonl，否则回退 pt（由 Adapter 决定）
+            # 5) Extract artifacts: prefer JSONL, else fall back to .pt (adapter decides)
             run_tag = f"{sampler_name}__{cand.candidate_id}"
             rows = adapter.collect_trial_rows(
                 results_root=results_dir,
@@ -127,11 +165,15 @@ def run_tune(cfg: Any) -> None:
                 candidate_id=cand.candidate_id,
             )
             trial_rows.extend(rows)
+            _log(
+                f"{cand_idx:>4}/{len(candidates)} {cand.candidate_id} done "
+                f"trials={len(rows)} elapsed={time.monotonic() - started_cand:.1f}s"
+            )
 
-        # 聚合层次（与论文/规格一致）：
-        # - trial_df：每个 trial 一行
-        # - run_df：按 seed 聚合（candidate × seed）
-        # - candidate_df：跨 seed 聚合（用于 objective 选 best）
+        # Aggregation levels (aligned with the spec/paper terms):
+        # - trial_df: one row per trial
+        # - run_df: aggregated by seed (candidate × seed)
+        # - candidate_df: aggregated across seeds (used by objective to choose best)
         trial_df = to_dataframe(trial_rows)
         run_df = aggregate_mean_std(df=trial_df, group_cols=["scenario", "sampler", "candidate_id", "run_tag", "seed"])
         candidate_df = aggregate_mean_std(df=trial_df, group_cols=["scenario", "sampler", "candidate_id"])
@@ -143,7 +185,7 @@ def run_tune(cfg: Any) -> None:
             extra={"candidate_metrics": candidate_df},
         )
 
-        # objective 选出 top-k 与 best
+        # Objective selects top-k and best
         topk_df, best_row = select_topk(
             candidate_df=candidate_df,
             objective_cfg=cfg.objective,
@@ -162,10 +204,17 @@ def run_tune(cfg: Any) -> None:
             best_candidate_dir = candidates_dir / best_candidate_id
             best_patch = read_yaml(best_candidate_dir / "patch.yaml")
 
-            # best_patch.yaml 是 Stage II 的核心输入；best.yaml 只是为了方便检查（完整 cfg）。
+            # `best_patch.yaml` is the core Stage-II input; `best.yaml` is for inspection (full merged cfg).
             write_yaml(sampler_best_dir / "best_patch.yaml", best_patch)
             best_full = merge_patches(read_yaml(base_cfg_path), best_patch)
             write_yaml(sampler_best_dir / "best.yaml", best_full)
+            _log(
+                f"best sampler={sampler_name} candidate={best_candidate_id} "
+                f"success_mean={_fmt_num(best_row.get('success_mean'))} "
+                f"time_mean={_fmt_num(best_row.get('t_inference_total_mean'))}"
+            )
+        else:
+            _log(f"sampler={sampler_name} no best candidate (empty ranking)")
 
         manifest["samplers"].append(
             {
@@ -177,17 +226,21 @@ def run_tune(cfg: Any) -> None:
                 "best_configs_dir": str(sampler_best_dir),
             }
         )
+        _log(f"sampler={sampler_name} completed in {time.monotonic() - started_sampler:.1f}s")
 
-    # manifest 记录了本次运行的“全量配置/搜索空间/阈值等”，用于论文复现与追溯。
+    # Manifest records full config/search space/thresholds for reproducibility and traceability.
     write_yaml(pipeline_root / "tune_manifest.yaml", manifest)
     write_text(pipeline_root / "DONE_TUNE.txt", "OK\n")
+    _section("STAGE I END")
+    _log(f"completed in {time.monotonic() - started_all:.1f}s out={pipeline_root}")
 
 
 def _build_adapter(cfg: Any) -> MPDAdapter:
     """
-    构造 Adapter。
+    Build an adapter.
 
-    当前 L1 只实现了 MPDAdapter（首个适配器）；未来扩展其它 planner 时建议在此处扩展分发逻辑。
+    In this L1 build we only implement `MPDAdapter` (the first concrete adapter).
+    When adding other planners, extend the dispatch logic here.
     """
     adapter_type = str(getattr(cfg.adapter, "type", "mpd")).lower()
     if adapter_type != "mpd":
@@ -196,7 +249,7 @@ def _build_adapter(cfg: Any) -> MPDAdapter:
 
 
 def _to_plain(value: Any) -> Any:
-    """把 OmegaConf 容器转成普通 Python dict/list（用于写 manifest）。"""
+    """Convert an OmegaConf container to plain Python dict/list (for manifest writing)."""
     try:
         # OmegaConf containers
         from omegaconf import OmegaConf

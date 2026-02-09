@@ -1,0 +1,90 @@
+# Quick smoke config:
+# - Goal: only verify that the DMEval + MPD two-stage pipeline runs end-to-end
+# - Samplers: DDPM and DPM-Solver++
+# - Note: each tuned dimension has >=2 values, so the grid size grows quickly
+
+defaults:
+  - planner: mpd
+  - adapter: mpd
+  - objective: lexicographic
+  - _self_
+
+# Fix entrypoint path resolution for mpd subprocesses in this repo (avoid duplicated workdir prefixes)
+planner:
+  workdir: .
+
+pipeline:
+  root: .tmp/dmeval_smoke_ddpm_dpmpp_${now:%Y-%m-%d_%H-%M-%S}
+  allow_overwrite: false
+
+common_inference_args:
+  selection_start_goal: validation
+  n_start_goal_states: 10
+  save_results_single_plan_low_mem: true
+  # In this repo, cuda:0 is recommended (cpu may trigger DataParallel device mismatch issues)
+  device: cuda:0
+
+# Temporary smoke mode: disable feasibility threshold filtering to avoid filtering out all candidates.
+objective:
+  mode: lexicographic
+  constraints: []
+  lexicographic_key:
+    - field: success_mean
+      order: desc
+      nan: low
+    - field: collision_intensity_mean
+      order: asc
+      nan: high
+    - field: t_inference_total_mean
+      order: asc
+      nan: high
+    - field: path_length_best_mean
+      order: asc
+      nan: high
+
+tune:
+  enabled: true
+  stage_dir: tune
+  scenario:
+    name: planar2link
+    base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvPlanar2Link-RobotPlanar2Link_00.yaml
+  seeds: [2]
+  top_k: 10
+  samplers:
+    - name: ddpm
+      patch_base:
+        diffusion_sampling_method: ddpm
+      search:
+        strategy: grid
+        space:
+          ddpm.t_start_guide_steps_fraction: [0.2, 0.3]
+          ddpm.prior_weight_with_guide: [0.95, 1.1]
+          ddpm.noise_std: [0.7, 0.8]
+          ddpm.n_guide_steps: [1, 2]
+          ddpm.guide_lr: [0.01, 0.03]
+          ddpm.max_perturb_x: [0.15, 0.2]
+    - name: dpm_solver_pp
+      patch_base:
+        diffusion_sampling_method: dpm_solver_pp
+      search:
+        strategy: grid
+        space:
+          dpm_solver.t_start_guide_steps_fraction: [0.2, 0.3]
+          dpm_solver.dpm_solver_steps: [20, 26]
+          dpm_solver.dpm_solver_order: [2, 3]
+          dpm_solver.dpm_solver_denoise_to_zero: [true, false]
+          dpm_solver.use_continuous_time: [false, true]
+          dpm_solver.lower_order_final: [true, false]
+          dpm_solver.prior_weight_with_guide: [1.1, 0.95]
+          dpm_solver.n_guide_steps: [1, 2]
+          dpm_solver.guide_lr: [0.01, 0.1]
+          dpm_solver.max_perturb_x: [0.15, 0.2]
+
+compare:
+  enabled: true
+  stage_dir: compare
+  best_configs_root: ${pipeline.root}/best_configs
+  seeds: [2]
+  scenarios:
+    - name: planar2link
+      base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvPlanar2Link-RobotPlanar2Link_00.yaml

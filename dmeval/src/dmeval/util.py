@@ -1,11 +1,11 @@
 """
-通用工具函数集合（与具体 planner/adapter 无关）。
+General utility helpers (planner/adapter agnostic).
 
-这里放的是“稳定的基础设施”能力：
-- 目录创建/清理（保证 pipeline.root 可控且可追溯）
-- YAML/JSONL 读写
-- patch 合并（base_cfg + best_patch 的深度合并）
-- dotpath 转嵌套 dict（用于从 search space 生成 patch）
+This module provides "stable infrastructure" helpers:
+- Directory creation/cleanup (keeping `pipeline.root` controlled and traceable)
+- YAML/JSONL read/write
+- Patch merging (deep merge of `base_cfg` + `best_patch`)
+- Dotpath -> nested dict conversion (to build patches from a search space)
 """
 
 from __future__ import annotations
@@ -24,21 +24,21 @@ from omegaconf import DictConfig, OmegaConf
 
 
 def now_utc_iso() -> str:
-    """返回 UTC 时间的 ISO 字符串（用于 manifest 记录）。"""
+    """Return the current UTC time as an ISO string (for manifests)."""
     return _dt.datetime.now(tz=_dt.timezone.utc).replace(microsecond=0).isoformat()
 
 
 def ensure_dir(path: Path) -> None:
-    """确保目录存在（mkdir -p）。"""
+    """Ensure a directory exists (mkdir -p)."""
     path.mkdir(parents=True, exist_ok=True)
 
 
 def ensure_empty_dir(path: Path, *, allow_overwrite: bool) -> None:
     """
-    创建一个“干净”的目录。
+    Create a "clean" directory.
 
-    - 如果目录已存在：allow_overwrite=false 时直接报错（防止覆盖实验结果）
-    - allow_overwrite=true 时会先删除再创建（适合 CI/单测/快速迭代）
+    - If the directory exists: raise when `allow_overwrite=false` (prevents clobbering results)
+    - When `allow_overwrite=true`: delete first then create (useful for CI/tests/iteration)
     """
     if path.exists():
         if not allow_overwrite:
@@ -51,7 +51,7 @@ def ensure_empty_dir(path: Path, *, allow_overwrite: bool) -> None:
 
 
 def safe_relpath(path: Path) -> str:
-    """尽量输出相对路径（用于日志/manifest），失败则回退绝对路径。"""
+    """Prefer relative paths for logs/manifests; fall back to absolute on failure."""
     try:
         return str(path.relative_to(Path.cwd()))
     except Exception:
@@ -59,7 +59,7 @@ def safe_relpath(path: Path) -> str:
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
-    """读取 YAML，并强制要求根节点为 mapping（dict）。"""
+    """Read a YAML file and require the root node to be a mapping (dict)."""
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
@@ -68,20 +68,20 @@ def read_yaml(path: Path) -> dict[str, Any]:
 
 
 def write_yaml(path: Path, data: Any) -> None:
-    """写 YAML（保持 key 顺序；允许中文）。"""
+    """Write YAML (preserve key order; allow Unicode)."""
     ensure_dir(path.parent)
     with path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
 
 
 def write_text(path: Path, text: str) -> None:
-    """写文本文件（UTF-8）。"""
+    """Write a UTF-8 text file."""
     ensure_dir(path.parent)
     path.write_text(text, encoding="utf-8")
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    """写 jsonl（每行一个 JSON dict）。"""
+    """Write JSONL (one JSON dict per line)."""
     ensure_dir(path.parent)
     with path.open("w", encoding="utf-8") as f:
         for row in rows:
@@ -90,13 +90,13 @@ def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 
 def deep_update(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     """
-    深度合并 dict（就地修改 base）。
+    Deep-merge dicts (mutates `base` in place).
 
-    约定：
-    - 若 base[k] 与 patch[k] 都是 dict：递归合并
-    - 否则 patch[k] 覆盖 base[k]
+    Rules:
+    - If both `base[k]` and `patch[k]` are dicts: merge recursively
+    - Otherwise: `patch[k]` overwrites `base[k]`
 
-    这个逻辑用于把 `best_patch.yaml` 叠加到 `base_cfg` 上生成最终 cfg。
+    This is used to overlay `best_patch.yaml` onto `base_cfg` to produce the final config.
     """
     for k, v in patch.items():
         if isinstance(v, dict) and isinstance(base.get(k), dict):
@@ -111,12 +111,12 @@ _DOTPATH_TOKEN = re.compile(r"^[A-Za-z0-9_]+$")
 
 def nested_dict_from_dotpath(dotpath: str, value: Any) -> dict[str, Any]:
     """
-    把形如 `dpm_solver.dpm_solver_steps` 的 dotpath 转为嵌套 dict：
+    Convert a dotpath like `dpm_solver.dpm_solver_steps` into a nested dict:
 
-    - 输入: ("a.b.c", 1)
-    - 输出: {"a": {"b": {"c": 1}}}
+    - Input: ("a.b.c", 1)
+    - Output: {"a": {"b": {"c": 1}}}
 
-    用途：search space 里用 dotpath 表示要 patch 的字段，生成 patch.yaml。
+    Used when the search space uses dotpaths to specify which fields to patch.
     """
     parts = [p for p in dotpath.split(".") if p]
     if not parts:
@@ -135,7 +135,7 @@ def nested_dict_from_dotpath(dotpath: str, value: Any) -> dict[str, Any]:
 
 
 def merge_patches(*patches: dict[str, Any]) -> dict[str, Any]:
-    """把多个 patch dict 依次深度合并成一个新的 dict。"""
+    """Deep-merge multiple patch dicts (in order) into a new dict."""
     out: dict[str, Any] = {}
     for p in patches:
         deep_update(out, p)
@@ -143,22 +143,22 @@ def merge_patches(*patches: dict[str, Any]) -> dict[str, Any]:
 
 
 def cfg_to_yaml_str(cfg: DictConfig) -> str:
-    """把 OmegaConf/DictConfig 转为可打印的 YAML（用于 `dmeval explain`）。"""
+    """Convert an OmegaConf/DictConfig to printable YAML (used by `dmeval explain`)."""
     return OmegaConf.to_yaml(cfg, resolve=True, sort_keys=False)
 
 
 def maybe_expand_envvars(value: str) -> str:
-    """展开环境变量（例如 ${MPDLX_DATA_ROOT}），主要给 planner cfg 使用。"""
+    """Expand environment variables (e.g. `${MPDLX_DATA_ROOT}`), mainly for planner configs."""
     return os.path.expandvars(value)
 
 
 @dataclass(frozen=True)
 class RunManifest:
     """
-    运行元信息（当前实现里主要写入 YAML manifest）。
+    Run metadata (currently written to YAML manifests).
 
-    注：为了保持 L1 简洁，这里没有做复杂的 schema/version 管理；
-    你如果后续要扩展为更严谨的 manifest，可在此处集中演进。
+    Note: to keep the L1 build minimal, we do not implement schema/version management here.
+    If you later want a stricter manifest format, evolve it centrally in this class.
     """
     tool: str
     started_at_utc: str

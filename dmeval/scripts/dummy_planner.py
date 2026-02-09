@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-Dummy Planner（仅用于自检/单测）。
+Dummy planner (for smoke tests / unit tests only).
 
-用途：
-- 在不安装 MPD / 不依赖 torch / 不需要 GPU 的情况下，快速验证 DMEval 的闭环是否正确：
+Use case:
+- Quickly validate the DMEval end-to-end loop without installing MPD, without torch, and without a GPU:
   Stage I tune -> best_configs -> Stage II compare -> CSV/plots/manifest
 
-行为：
-- 接收与 MPD inference.py 类似的一组 CLI 参数（cfg_inference_path/results_dir/seed/N/device...）
-- 在 `<results_dir>/<seed>/` 下写出：
+Behavior:
+- Accepts a CLI shape similar to MPD's `inference.py` (cfg_inference_path/results_dir/seed/N/device...)
+- Writes the following under `<results_dir>/<seed>/`:
   - args_inference.yaml
-  - trial_metrics.jsonl（每个 trial 一行）
+  - trial_metrics.jsonl (one JSON object per trial)
 
-注意：
-- 该脚本不生成 `.pt`，因此 DMEval 会走 Adapter 的 jsonl 分支（更轻量）
+Note:
+- This script does not generate `.pt` files, so DMEval will exercise the adapter's JSONL path (lighter-weight).
 """
 
 from __future__ import annotations
@@ -30,21 +30,21 @@ import yaml
 
 
 def _load_cfg(path: Path) -> dict[str, Any]:
-    """读取 cfg_inference.yaml（这里只需要少数字段来模拟“速度-质量”关系）。"""
+    """Load `cfg_inference.yaml` (only a few fields are needed for the toy speed/quality model)."""
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     return data if isinstance(data, dict) else {}
 
 
 def _write_yaml(path: Path, data: Any) -> None:
-    """写 YAML（保持 key 顺序，允许中文）。"""
+    """Write YAML (preserve key order; allow Unicode)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    """写 jsonl（每行一个 trial 指标 dict）。"""
+    """Write JSONL (one trial-metrics dict per line)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         for r in rows:
@@ -52,7 +52,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def main() -> int:
-    """dummy planner 主入口（保持与 MPD 相同/相近的参数形状，便于被 runner.py 调用）。"""
+    """Dummy planner entrypoint (keeps a CLI similar to MPD so it can be called by `runner.py`)."""
     parser = argparse.ArgumentParser(description="Dummy planner that mimics MPD outputs (jsonl only).")
     parser.add_argument("--cfg_inference_path", required=True)
     parser.add_argument("--results_dir", required=True)
@@ -67,9 +67,9 @@ def main() -> int:
     diffusion_sampling_method = str(cfg.get("diffusion_sampling_method", "ddim"))
     planner_alg = str(cfg.get("planner_alg", "mpd"))
 
-    # 构造一个简单的“速度-质量”玩具模型：
-    # - steps 越多，time 越大
-    # - steps 越多，success 概率越大但会饱和
+    # A simple toy "speed vs. quality" model:
+    # - more steps => more time
+    # - more steps => higher success probability (with saturation)
     steps = None
     if diffusion_sampling_method == "ddim":
         steps = int(((cfg.get("ddim") or {}).get("ddim_sampling_timesteps") or 10))
@@ -78,10 +78,10 @@ def main() -> int:
     else:
         steps = 10
 
-    # 通过 seed + sampler 做确定性随机，保证同一配置可复现。
+    # Deterministic RNG based on (seed, sampler) for reproducibility.
     random.seed(int(args.seed) + 1000 * int(abs(hash(diffusion_sampling_method)) % 1000))
 
-    # 生成 toy 指标分布。
+    # Generate a toy metrics distribution.
     base_time = 0.05 * steps
     base_success = 1.0 - math.exp(-steps / 15.0)
     base_success = max(0.0, min(1.0, base_success))
@@ -100,7 +100,7 @@ def main() -> int:
         },
     )
 
-    # 生成 N 行 trial 指标（字段名与 DMEval 期望的口径一致）。
+    # Generate N trial rows (field names match what DMEval expects).
     rows: list[dict[str, Any]] = []
     for trial_id in range(int(args.n_start_goal_states)):
         jitter = random.random() * 0.02
@@ -126,7 +126,7 @@ def main() -> int:
             }
         )
 
-    # 模拟一点点运行耗时，避免某些环境里“0 秒完成”导致图表/排序不明显。
+    # Add a tiny delay so plots/rankings are not trivially identical in some environments.
     time.sleep(0.01)
     _write_jsonl(seed_dir / "trial_metrics.jsonl", rows)
 

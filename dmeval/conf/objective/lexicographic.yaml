@@ -1,10 +1,10 @@
-# objective=lexicographic：
-# - 先做 constraints 阈值过滤（不满足直接淘汰）
-# - 再按 lexicographic_key 做多指标字典序排序
+# objective=lexicographic:
+# - apply constraint threshold filtering first (infeasible candidates are rejected)
+# - then rank within the feasible set by a lexicographic key (multi-metric ordering)
 
 mode: lexicographic
 constraints:
-  # 这些字段来自 candidate_metrics.csv（即 trial 级别聚合后的 *_mean 列）。
+  # These fields come from candidate_metrics.csv (i.e., trial-level aggregated *_mean columns).
   - field: success_mean
     op: ge
     value: 0.8
@@ -14,7 +14,7 @@ constraints:
   - field: collision_intensity_mean
     op: le
     value: 0.05
-# 可行集合内按以下 key 排序：从上到下优先级依次降低。
+# Sort within feasible set by the following keys (priority decreases from top to bottom).
 lexicographic_key:
   - field: success_mean
     order: desc

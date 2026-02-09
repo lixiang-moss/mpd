@@ -1,21 +1,21 @@
 """
-MPDAdapter：把 MPD 的产物目录解析成“统一口径”的 trial 行字典。
+MPDAdapter: parse MPD artifact directories into unified per-trial row dicts.
 
-为什么在“通用工具”里会有 MPD 专用 adapter？
-- 通用的是评测流程（tune/compare/聚合/排名），不是所有 planner 的输出格式
-- 因此必须把“结果目录解析”封装在 Adapter 层
-- MPDAdapter 是第一个落地实现：既是适配器，也是参考实现
+Why does a "general evaluation tool" contain an MPD-specific adapter?
+- The evaluation workflow (tune/compare/aggregation/ranking) is general, but output formats differ per planner
+- Therefore "results directory parsing" must live behind an Adapter interface
+- MPDAdapter is the first concrete adapter and also serves as a reference implementation
 
-输入（MPD 侧产物，按 `工具描述文档.md`）：
-- 每个 seed 目录至少包含：
+Input (MPD artifacts, per spec):
+- Each seed directory contains at least:
   - args_inference.yaml
-  - results_single_plan-XXX.pt（N 个）
-- 推荐轻量输出（如果有则优先用）：
-  - trial_metrics.jsonl（每个 trial 一行 JSON）
+  - results_single_plan-XXX.pt (N files)
+- Recommended lightweight output (preferred when present):
+  - trial_metrics.jsonl (one JSON object per trial)
 
-输出（DMEval 侧，trial 行 dict）：
-- 元信息：scenario/run_tag/seed/trial_id/sampler/candidate_id 等
-- 指标字段：success/fraction_valid/collision_intensity/time/path_length/...（字段口径尽量贴近规格）
+Output (DMEval side, per-trial row dicts):
+- metadata: scenario/run_tag/seed/trial_id/sampler/candidate_id, etc.
+- metric fields: success/fraction_valid/collision_intensity/time/path_length/... (aligned with the spec where possible)
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ import yaml
 
 
 def _to_float(value: Any) -> float:
-    """把各种可能的数值类型（含 torch tensor）转换为 float；失败则返回 NaN。"""
+    """Convert various numeric-like values (including torch tensors) to float; return NaN on failure."""
     if value is None:
         return float("nan")
     if isinstance(value, (int, float)):
@@ -51,7 +51,7 @@ def _to_float(value: Any) -> float:
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    """读取 YAML；文件不存在则返回空 dict。"""
+    """Load YAML; return an empty dict if the file does not exist."""
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as f:
@@ -64,7 +64,7 @@ _TRIAL_ID_RE = re.compile(r"results_single_plan-(\d+)\.pt$")
 
 @dataclass(frozen=True)
 class MPDAdapterConfig:
-    """MPDAdapter 的可配置项（文件名/优先级等）。"""
+    """Config options for MPDAdapter (filenames, priority, etc.)."""
     prefer_jsonl: bool = True
     trial_metrics_jsonl: str = "trial_metrics.jsonl"
     run_summary_yaml: str = "run_summary.yaml"
@@ -73,13 +73,13 @@ class MPDAdapterConfig:
 
 
 class MPDAdapter:
-    """MPD 结果解析适配器。"""
+    """Adapter for parsing MPD results."""
     def __init__(self, cfg: MPDAdapterConfig):
         self.cfg = cfg
 
     @classmethod
     def from_cfg(cls, adapter_cfg: Any) -> "MPDAdapter":
-        """从 Hydra 配置节点构造 MPDAdapterConfig。"""
+        """Construct `MPDAdapterConfig` from a Hydra config node."""
         cfg = MPDAdapterConfig(
             prefer_jsonl=bool(getattr(adapter_cfg, "prefer_jsonl", True)),
             trial_metrics_jsonl=str(getattr(adapter_cfg, "trial_metrics_jsonl", "trial_metrics.jsonl")),
@@ -99,16 +99,16 @@ class MPDAdapter:
         candidate_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """
-        从一个结果根目录收集 trial 行。
+        Collect per-trial rows from a run results root.
 
-        参数:
-          results_root: 一个 run 的结果目录（DMEval 传入，例如 `<candidate_dir>/results`）
-          scenario/run_tag: 用于写入 CSV 的元信息
-          sampler/candidate_id: 可选元信息（Stage I 会填入）
+        Args:
+          results_root: results directory for one run (passed by DMEval, e.g. `<candidate_dir>/results`)
+          scenario/run_tag: metadata used in CSV outputs
+          sampler/candidate_id: optional metadata (filled in Stage I)
 
-        行为:
-          - prefer_jsonl=true 且存在 jsonl 时：优先解析 jsonl（轻量、无需 torch）
-          - 否则回退解析 results_single_plan-*.pt（需要 torch）
+        Behavior:
+          - When `prefer_jsonl=true` and JSONL exists: parse JSONL first (lightweight, no torch required)
+          - Otherwise: fall back to parsing `results_single_plan-*.pt` (requires torch)
         """
         results_root = results_root.resolve()
         rows: list[dict[str, Any]] = []
@@ -120,7 +120,7 @@ class MPDAdapter:
                     seed_dir = jsonl_path.parent
                     seed = seed_dir.name
                     args_inf = _load_yaml(seed_dir / self.cfg.args_inference_yaml)
-                    # jsonl 每一行就是一个 trial 的指标 dict，这里只补齐元信息并合并字段。
+                    # Each JSONL line is one trial-metrics dict; we only add metadata and merge fields.
                     rows.extend(
                         self._rows_from_jsonl(
                             jsonl_path=jsonl_path,
@@ -134,7 +134,7 @@ class MPDAdapter:
                     )
                 return rows
 
-        # 回退分支：扫描 .pt 结果并用 torch.load 解析。
+        # Fallback: scan .pt results and parse via torch.load.
         pt_files = self._find_glob(results_root, self.cfg.results_pt_glob)
         for pt_path in pt_files:
             seed_dir = pt_path.parent
@@ -156,7 +156,7 @@ class MPDAdapter:
         return rows
 
     def _find_files(self, root: Path, filename: str) -> list[Path]:
-        """递归查找指定文件名（用于 jsonl/args_inference.yaml）。"""
+        """Recursively find files by exact filename (used for JSONL/args_inference.yaml)."""
         hits: list[Path] = []
         for r, _, files in os.walk(root):
             if filename in files:
@@ -164,7 +164,7 @@ class MPDAdapter:
         return sorted(hits)
 
     def _find_glob(self, root: Path, pattern: str) -> list[Path]:
-        """递归按 glob pattern 查找（用于 results_single_plan-*.pt）。"""
+        """Recursively find files by glob-like pattern (used for results_single_plan-*.pt)."""
         hits: list[Path] = []
         for r, _, files in os.walk(root):
             for fname in files:
@@ -173,7 +173,7 @@ class MPDAdapter:
         return sorted(hits)
 
     def _infer_trial_id(self, path: Path) -> int:
-        """从 `results_single_plan-XXX.pt` 文件名提取 trial_id。"""
+        """Extract `trial_id` from `results_single_plan-XXX.pt` filename."""
         m = _TRIAL_ID_RE.search(path.name)
         return int(m.group(1)) if m else -1
 
@@ -188,7 +188,7 @@ class MPDAdapter:
         sampler: str | None,
         candidate_id: str | None,
     ) -> Iterable[dict[str, Any]]:
-        """解析 trial_metrics.jsonl 并补齐元信息。"""
+        """Parse `trial_metrics.jsonl` and add metadata fields."""
         with jsonl_path.open("r", encoding="utf-8") as f:
             for i, line in enumerate(f):
                 line = line.strip()
@@ -198,7 +198,7 @@ class MPDAdapter:
                 if not isinstance(obj, dict):
                     continue
                 trial_id = int(obj.get("trial_id", i))
-                # base_meta 提供：scenario/run_tag/seed/trial_id/planner_alg/diffusion_sampling_method 等。
+                # base_meta provides scenario/run_tag/seed/trial_id/planner_alg/diffusion_sampling_method, etc.
                 row = self._base_meta(
                     scenario=scenario,
                     run_tag=run_tag,
@@ -224,11 +224,11 @@ class MPDAdapter:
         candidate_id: str | None,
     ) -> dict[str, Any]:
         """
-        解析单个 `.pt` trial 文件（MPD 默认产物）。
+        Parse a single `.pt` trial file (MPD default artifact).
 
-        说明：
-        - 这里严格遵循“只抽取、不重算”原则：只读取 result.metrics 里的字段。
-        - torch 依赖只在这个分支里导入，避免 DMEval 在 jsonl-only 模式下强依赖 torch。
+        Notes:
+        - Strictly follows "extract only, do not recompute": reads fields from `result.metrics` only.
+        - Torch is imported only in this branch so JSONL-only mode does not require torch.
         """
         try:
             import torch  # type: ignore
@@ -315,7 +315,7 @@ class MPDAdapter:
             }
         )
 
-        # 兼容性处理：有些版本可能把 diversity 直接存成数字/tensor，而不是对象.value。
+        # Compatibility: some versions may store `diversity` as a number/tensor rather than an object with `.value`.
         if math.isnan(row["diversity"]):
             row["diversity"] = _to_float(getattr(getattr(metrics, "trajs_valid", None), "diversity", None))
 
@@ -333,11 +333,11 @@ class MPDAdapter:
         candidate_id: str | None,
     ) -> dict[str, Any]:
         """
-        构造每行都需要的元信息字段。
+        Construct metadata fields required for every row.
 
-        这些字段不参与 MPD 指标计算，但对 DMEval 的聚合/排名/可追溯性非常关键：
+        These fields are not part of MPD's metric computation, but are crucial for DMEval aggregation/ranking/traceability:
         - scenario / run_tag / seed / trial_id
-        - sampler / candidate_id（Stage I/II 组织对比用）
+        - sampler / candidate_id (used to organize Stage I/II comparisons)
         """
         row: dict[str, Any] = {
             "scenario": scenario,

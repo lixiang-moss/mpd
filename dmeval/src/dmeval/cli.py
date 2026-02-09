@@ -1,18 +1,19 @@
 """
-DMEval vNext（L1）命令行入口。
+DMEval vNext (L1) command-line entrypoint.
 
-调用链（高度概括）：
-CLI -> Hydra compose 配置 -> Stage I tune / Stage II compare -> runner 子进程 -> adapter 抽取 -> 聚合/排名/绘图。
+Call chain (high level):
+CLI -> Hydra config composition -> Stage I tune / Stage II compare -> runner subprocess -> adapter extraction -> aggregation/ranking/plotting.
 
-这里刻意不使用 `@hydra.main`：
-- 避免 Hydra 接管 cwd/outputs 目录体系（符合 `工具描述文档.md` 的 L1 原则）
-- 只使用 Hydra 的 defaults + overrides 组合能力（compose API）
+We intentionally avoid `@hydra.main`:
+- Prevent Hydra from taking over cwd/outputs directory management (L1 principle)
+- Use only Hydra's composition features (defaults + overrides via compose API)
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from .config_loader import load_hydra_config
@@ -20,22 +21,36 @@ from .stage_compare import run_compare
 from .stage_tune import run_tune
 from .util import cfg_to_yaml_str
 
+_LINE = "-" * 72
+
+
+def _log(msg: str) -> None:
+    """Lightweight terminal logging (enabled by default)."""
+    print(f"[dmeval] {msg}", flush=True)
+
+
+def _section(title: str) -> None:
+    """Print a section divider for readability."""
+    print(_LINE, flush=True)
+    _log(title)
+    print(_LINE, flush=True)
+
 
 def _default_config_path() -> Path | None:
-    """当用户没传 `--config` 时使用的默认配置路径。"""
+    """Default config path when the user does not provide `--config`."""
     candidate = Path("dmeval/conf/config.yaml")
     return candidate if candidate.exists() else None
 
 
 def main(argv: list[str] | None = None) -> int:
     """
-    CLI 主函数。
+    CLI main function.
 
-    参数:
-      argv: 传入自定义参数列表（测试/嵌入式调用时有用）；None 表示使用 sys.argv。
+    Args:
+      argv: optional custom argv list (useful for tests/embedded runs). None uses `sys.argv`.
 
-    返回:
-      进程退出码（0 表示成功）。
+    Returns:
+      Process exit code (0 on success).
     """
     parser = argparse.ArgumentParser(prog="dmeval", description="DMEval vNext (L1) CLI")
     parser.add_argument(
@@ -50,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         help=(
-            "Hydra override（可重复），例如："
+            "Hydra override (repeatable), e.g.: "
             "-o pipeline.root=outputs/run1 -o common_inference_args.device=cuda:0"
         ),
     )
@@ -62,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("explain", help="Print the resolved config (after Hydra composition).")
 
     args = parser.parse_args(argv)
+    started = time.monotonic()
 
     config_path = Path(args.config) if args.config else _default_config_path()
     if config_path is None:
@@ -69,23 +85,37 @@ def main(argv: list[str] | None = None) -> int:
     if not config_path.exists():
         parser.error(f"--config not found: {config_path}")
 
-    # 通过 Hydra compose API 加载配置（只做组合/覆盖，不触发 Hydra 的运行目录管理）。
+    # Load config via Hydra compose API (composition/overrides only; no Hydra run-dir management).
     cfg = load_hydra_config(config_path=config_path, overrides=list(args.override))
+    _section(f"COMMAND START | {args.cmd}")
+    _log(f"config={config_path}")
+    _log(f"pipeline.root={cfg.pipeline.root}")
+    _log(f"overrides={len(args.override)}")
 
-    # 分发子命令。`run` 会按顺序执行 tune -> compare，并共享同一个 pipeline.root（保证闭环一致）。
+    # Dispatch subcommands. `run` executes tune -> compare and shares the same pipeline.root.
     if args.cmd == "tune":
         run_tune(cfg)
+        _section("COMMAND END | tune")
+        _log(f"completed in {time.monotonic() - started:.1f}s")
         return 0
     if args.cmd == "compare":
         run_compare(cfg)
+        _section("COMMAND END | compare")
+        _log(f"completed in {time.monotonic() - started:.1f}s")
         return 0
     if args.cmd == "run":
+        _section("TRANSITION | STAGE I (tune)")
         run_tune(cfg)
+        _section("TRANSITION | STAGE II (compare)")
         run_compare(cfg)
+        _section("COMMAND END | run")
+        _log(f"completed in {time.monotonic() - started:.1f}s")
         return 0
     if args.cmd == "explain":
-        # 方便你调试 defaults/overrides 生效情况。
+        # Helpful for debugging Hydra defaults/overrides.
         print(cfg_to_yaml_str(cfg))
+        _section("COMMAND END | explain")
+        _log(f"completed in {time.monotonic() - started:.1f}s")
         return 0
 
     print(f"Unknown command: {args.cmd}", file=sys.stderr)

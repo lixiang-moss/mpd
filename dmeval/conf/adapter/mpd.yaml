@@ -1,13 +1,13 @@
-# adapter=mpd：定义 MPD 产物目录的文件名约定与读取优先级。
+# adapter=mpd: defines MPD artifact filenames and parsing priority.
 
 type: mpd
-# prefer_jsonl=true 时：如果结果目录里存在 trial_metrics.jsonl，会优先用 jsonl（更轻量）。
+# If prefer_jsonl=true and trial_metrics.jsonl exists, parse JSONL first (lighter-weight).
 prefer_jsonl: true
-# 轻量输出（推荐）：每个 trial 一行 JSON。
+# Recommended lightweight output: one JSON object per trial.
 trial_metrics_jsonl: trial_metrics.jsonl
-# 可选：若 MPD 未来支持 run_summary.yaml，可用它加速 candidate 聚合（当前实现未用到）。
+# Optional: if MPD adds run_summary.yaml in the future, it could speed up candidate aggregation (unused currently).
 run_summary_yaml: run_summary.yaml
-# MPD inference 会写 args_inference.yaml（用于补齐 planner_alg / diffusion_sampling_method 等元信息）。
+# MPD inference writes args_inference.yaml (used to fill metadata like planner_alg / diffusion_sampling_method).
 args_inference_yaml: args_inference.yaml
-# 回退分支：没有 jsonl 时，扫描 results_single_plan-*.pt 并 torch.load。
+# Fallback: if JSONL is missing, scan results_single_plan-*.pt and parse via torch.load.
 results_pt_glob: results_single_plan-*.pt

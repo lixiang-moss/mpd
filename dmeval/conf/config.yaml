@@ -1,54 +1,54 @@
-# DMEval 默认主配置（示例用）。
-# 你可以复制一份（例如 config_mpd.yaml）再按论文实验需求修改。
+# Default DMEval main config (example).
+# Recommended: copy it (e.g. to config_mpd.yaml) and modify for your experiment needs.
 
 defaults:
-  # defaults 用于组合子配置（Hydra compose）。
-  # L1 原则：Hydra 只用于组合/覆盖，不接管 cwd/outputs。
+  # `defaults` composes sub-configs via Hydra.
+  # L1 principle: Hydra is used only for compose/overrides; it does not manage cwd/outputs.
   - planner: mpd
   - adapter: mpd
   - objective: lexicographic
   - _self_
 
 pipeline:
-  # 所有输出的根目录（强烈建议每次用新目录，避免覆盖）。
+  # Root directory for all outputs (strongly recommended to use a fresh dir per run).
   root: outputs/dmeval_${now:%Y-%m-%d_%H-%M-%S}
-  # allow_overwrite=false 时，如果 root 已存在会直接报错（保护实验结果）。
+  # When allow_overwrite=false and the root exists, fail fast (protects experiment artifacts).
   allow_overwrite: false
 
 common_inference_args:
-  # 下面这些参数会被 runner.py 统一拼接到 planner 的命令行上（与 MPD inference 参数对齐）。
+  # These args are appended by runner.py to the planner command line (aligned with MPD inference args).
   selection_start_goal: validation
-  # N：一次 run 内 trial 的数量（start-goal 个数）。
+  # N: number of trials within a single run (number of start-goal states).
   n_start_goal_states: 5
   save_results_single_plan_low_mem: true
   device: cpu
 
 tune:
-  # Stage I：调参阶段（单场景）。
+  # Stage I: tuning stage (single scenario).
   enabled: true
   stage_dir: tune
   scenario:
-    # 仅用于记录/写 CSV 的场景名（不要求与 MPD 完全一致）。
+    # Scenario name for CSV/records (does not need to match MPD exactly).
     name: spheres3d_panda
-    # base_cfg：被测系统（MPD）的 inference 配置文件路径。
+    # base_cfg: system-under-test (MPD) inference config file path.
     base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvSpheres3D-RobotPanda_00.yaml
-  # 为了开发方便可以只用一个 seed；论文建议使用多 seed 提升稳健性。
+  # For development you can use a single seed; for papers use multiple seeds for robustness.
   seeds: [2]
-  # 每个 sampler 输出 top-k（同时会写 best_patch.yaml 作为 Stage II 输入）。
+  # Output top-k per sampler (and write best_patch.yaml as Stage II input).
   top_k: 3
-  # “一键调优多个采样器”：这里列出哪些 sampler 就会按顺序调哪些 sampler。
+  # "Tune multiple samplers": samplers listed here are tuned serially in order.
   samplers:
 
   
     - name: ddim
-      # patch_base：该 sampler 固定需要覆盖的基础字段（例如 diffusion_sampling_method）。
+      # patch_base: fixed overrides required by this sampler (e.g., diffusion_sampling_method).
       patch_base:
         diffusion_sampling_method: ddim
       search:
-        # 搜索策略：grid/random/optuna（当前最小实现提供 grid/random）。
+        # Search strategy: grid/random/optuna (this minimal build implements grid/random).
         strategy: grid
         space:
-          # space 里用 dotpath 表示要覆盖的字段（会生成 patch.yaml 并合并到 base_cfg）。
+          # `space` uses dotpaths for fields to override (generates patch.yaml merged into base_cfg).
           ddim.ddim_sampling_timesteps: [10, 15]
           ddim.ddim_eta: [0.0, 0.5]
           ddim.n_guide_steps: [2, 4]
@@ -56,8 +56,8 @@ tune:
 
     - name: dpm_solver_pp
       patch_base:
-        # 注意：MPD 里 diffusion_sampling_method 仍可能是 dpm_solver，
-        # 但通过 dpm_solver_algorithm_type 区分 dpmsolver++（以 MPD 配置为准）。
+        # Note: in MPD, diffusion_sampling_method may still be `dpm_solver`;
+        # dpmsolver++ is distinguished via dpm_solver_algorithm_type (follow MPD config conventions).
         diffusion_sampling_method: dpm_solver
         dpm_solver:
           dpm_solver_algorithm_type: dpmsolver++
@@ -69,13 +69,13 @@ tune:
           dpm_solver.prior_weight_with_guide: [0.95, 1.05]
 
 compare:
-  # Stage II：公平对比阶段（多场景）。
+  # Stage II: fair comparison stage (multiple scenarios).
   enabled: true
   stage_dir: compare
-  # Stage II 会从这里读取 Stage I 写出的 best_configs。
+  # Stage II reads Stage-I best_configs from here.
   best_configs_root: ${pipeline.root}/best_configs
   seeds: [2]
-  # 多场景对比：每个 scenario 提供一个 MPD base_cfg（Stage II 会对它打 best_patch）。
+  # Multi-scenario comparison: each scenario provides an MPD base_cfg (Stage II applies best_patch to it).
   scenarios:
     - name: spheres3d_panda
       base_cfg: mpd-splines-public/scripts/inference/cfgs/config_EnvSpheres3D-RobotPanda_00.yaml

@@ -1,14 +1,14 @@
 """
-子进程 Runner（串行执行）。
+Subprocess runner (serial execution).
 
-职责：
-- 把“planner 入口 + 推理参数”统一转成命令行参数
-- 串行 `subprocess.run` 运行被测系统（例如 MPD）
-- 把 stdout/stderr 写到 log 文件，便于复现与排障
+Responsibilities:
+- Convert "planner entrypoint + inference args" into a unified CLI invocation
+- Run the system-under-test (e.g., MPD) via `subprocess.run` (serially)
+- Write stdout/stderr to a log file for reproducibility and debugging
 
-注意：
-- 这里不做并行/队列（符合 L1 “只串行”原则）
-- 这里不解析结果，解析由 Adapter 负责（解耦）
+Notes:
+- No parallelism/queueing here (L1 principle: serial only)
+- This module does not parse results; adapters handle parsing (separation of concerns)
 """
 
 from __future__ import annotations
@@ -19,16 +19,16 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .util import ensure_dir, write_text
+from .util import ensure_dir, safe_relpath, write_text
 
 
 def _bool_to_cli(value: bool) -> str:
-    """把 Python bool 转成许多 CLI 常见的 true/false 字符串。"""
+    """Convert Python bool to common CLI-style `true`/`false` strings."""
     return "true" if value else "false"
 
 
 def _format_cli_value(value: Any) -> str:
-    """将参数值格式化为 CLI 字符串（目前主要处理 bool）。"""
+    """Format a parameter value as a CLI string (currently mainly handles bool)."""
     if isinstance(value, bool):
         return _bool_to_cli(value)
     return str(value)
@@ -51,16 +51,16 @@ def run_planner_subprocess(
     log_path: Path | None = None,
 ) -> None:
     """
-    串行运行一次 planner 子进程（对应规格里的“一次 run = candidate × seed”）。
+    Run one planner subprocess serially (in the spec: one run = candidate × seed).
 
-    约定：
-    - results_dir 由 DMEval 指定；planner 自己决定是否创建 seed 子目录
-    - DMEval 会在 results_dir 下写 `dmeval_cmd.txt`，记录最终命令行（可追溯）
-    - 子进程 stdout/stderr 会写到 log_path（默认 dmeval_subprocess.log）
+    Conventions:
+    - `results_dir` is chosen by DMEval; the planner may create a seed subdirectory inside it
+    - DMEval writes `dmeval_cmd.txt` under `results_dir` to record the exact command (traceability)
+    - Subprocess stdout/stderr are written to `log_path` (default: `dmeval_subprocess.log`)
     """
     ensure_dir(results_dir)
 
-    # 统一命令行参数：这部分就是 `工具描述文档.md` 里示例命令的实现化。
+    # Unified CLI parameters (this corresponds to the example command in the spec).
     cmd: list[str] = [
         python,
         entrypoint,
@@ -83,10 +83,10 @@ def run_planner_subprocess(
         cmd.extend(extra_args)
 
     ensure_dir(results_dir)
-    # 保存一份“可复制粘贴”的最终命令，方便复现与排障。
+    # Save a copy-pastable final command for repro/debugging.
     write_text(results_dir / "dmeval_cmd.txt", shlex.join(cmd) + "\n")
 
-    # 继承当前进程环境变量（例如数据根目录、CUDA 等），必要时可通过 env 追加覆盖。
+    # Inherit current environment variables (e.g., data roots, CUDA); optionally override via `env`.
     run_env = os.environ.copy()
     if env:
         run_env.update(env)
@@ -96,7 +96,7 @@ def run_planner_subprocess(
 
     ensure_dir(log_path.parent)
     with log_path.open("w", encoding="utf-8") as log_f:
-        # check=False：我们希望在失败时也能先拿到 log 文件，再统一抛异常。
+        # check=False: we want the log file even on failure, then raise a single structured error.
         proc = subprocess.run(
             cmd,
             cwd=str(workdir),
@@ -106,4 +106,8 @@ def run_planner_subprocess(
             check=False,
         )
     if proc.returncode != 0:
-        raise RuntimeError(f"Planner subprocess failed (exit={proc.returncode}). See log: {log_path}")
+        rel_log_path = safe_relpath(log_path)
+        rel_workdir = safe_relpath(workdir)
+        raise RuntimeError(
+            f"Planner subprocess failed (exit={proc.returncode}, seed={seed}, cwd={rel_workdir}). See log: {rel_log_path}"
+        )

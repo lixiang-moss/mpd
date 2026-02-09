@@ -1,17 +1,17 @@
 """
-DMEval vNext（L1）包入口。
+DMEval vNext (L1) package entrypoint.
 
-这个包实现了论文/工具规格里描述的 DMEval 管线：
-- Stage I: tune（调参，输出 best_configs）
-- Stage II: compare（读取 best_configs 做跨场景公平对比）
+This package implements the DMEval pipeline described in the project spec:
+- Stage I: tune (hyperparameter search; outputs `best_configs/`)
+- Stage II: compare (loads `best_configs/` and runs fair comparisons across scenarios)
 
-注意：DMEval **不计算指标**，只负责：
-1) 串行调用被测系统（例如 MPD）执行推理；
-2) 从结果目录抽取指标（Adapter）；
-3) 聚合/排序/可视化并写出统一产物（CSV/plots/manifest）。
+Important: DMEval **does not compute metrics**. It only:
+1) Runs the system-under-test (e.g., MPD) serially as subprocesses;
+2) Extracts metrics from the results directory (via an Adapter);
+3) Aggregates/ranks/plots and writes standardized artifacts (CSV/plots/manifests).
 """
 
 __all__ = ["__version__"]
 
-# 版本号：用于输出 manifest/论文复现记录时标识工具版本。
+# Version string used in manifests and reproducibility records.
 __version__ = "0.1.0"

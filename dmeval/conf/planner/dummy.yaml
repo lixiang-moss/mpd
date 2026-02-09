@@ -1,5 +1,5 @@
-# planner=dummy：用于自检/单测的虚拟 planner。
-# 它会写出 trial_metrics.jsonl，从而验证 Adapter/聚合/排名/绘图等逻辑是否跑通。
+# planner=dummy: a virtual planner for smoke tests/unit tests.
+# It writes trial_metrics.jsonl to validate adapter/aggregation/ranking/plotting logic end-to-end.
 
 name: dummy
 python: python3

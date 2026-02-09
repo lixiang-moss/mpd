@@ -1,14 +1,14 @@
 """
-可视化模块（最小实现）。
+Plotting utilities (minimal implementation).
 
-目标：
-- 输出 `工具描述文档.md` 要求的基础图：
-  - success / fraction_valid / time 的柱状图
-  - time vs success 的散点图
+Goals:
+- Produce the minimal plots required by the spec:
+  - bar plots for success / fraction_valid / time
+  - scatter plot for time vs success
 
-注意：
-- 这里刻意保持简单，避免引入更重的可视化框架（L1 先跑通闭环）
-- 论文级别的图表美化/排版（如 seaborn/plotly/latex）可以后续增强
+Notes:
+- Kept intentionally simple to avoid heavy plotting dependencies (L1: make the loop work first)
+- Paper-quality styling/layout (seaborn/plotly/LaTeX, etc.) can be added later
 """
 
 from __future__ import annotations
@@ -23,11 +23,11 @@ from .util import ensure_dir
 
 def plot_stage_compare(*, run_metrics_agg: pd.DataFrame, out_dir: Path) -> None:
     """
-    为 Stage II 产物绘图。
+    Plot Stage-II artifacts.
 
-    参数:
-      run_metrics_agg: 按 (scenario,sampler) 聚合后的 DataFrame（通常来自 collect.aggregate_mean_std）
-      out_dir: 输出目录（会写入多张 png）
+    Args:
+      run_metrics_agg: DataFrame aggregated by (scenario, sampler) (typically from `collect.aggregate_mean_std`)
+      out_dir: output directory (writes multiple PNGs)
     """
     if run_metrics_agg.empty:
         return
@@ -42,7 +42,7 @@ def plot_stage_compare(*, run_metrics_agg: pd.DataFrame, out_dir: Path) -> None:
         sdf = run_metrics_agg[run_metrics_agg["scenario"] == scenario].copy()
         if sdf.empty:
             continue
-        # 统一输出文件名 `<scenario>__<metric>.png`，方便脚本/论文引用。
+        # Use a stable filename scheme `<scenario>__<metric>.png` for easy scripting/paper references.
         _barplot(sdf, x="sampler", y="success_mean", title=f"{scenario}: success", out=out_dir / f"{scenario}__success.png")
         _barplot(
             sdf,
@@ -69,7 +69,7 @@ def plot_stage_compare(*, run_metrics_agg: pd.DataFrame, out_dir: Path) -> None:
 
 
 def _barplot(df: pd.DataFrame, *, x: str, y: str, title: str, out: Path) -> None:
-    """最简单的柱状图封装（每个 sampler 一根柱）。"""
+    """Simple bar-plot helper (one bar per sampler)."""
     if y not in df.columns:
         return
     plt.figure(figsize=(8, 4))
@@ -82,7 +82,7 @@ def _barplot(df: pd.DataFrame, *, x: str, y: str, title: str, out: Path) -> None
 
 
 def _scatter(df: pd.DataFrame, *, x: str, y: str, label_col: str, title: str, out: Path) -> None:
-    """散点图（并在点旁边标注 sampler 名称）。"""
+    """Scatter plot helper (annotates each point with the sampler name)."""
     if x not in df.columns or y not in df.columns:
         return
     plt.figure(figsize=(6, 4))
